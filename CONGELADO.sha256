@@ -1,0 +1,2 @@
+# `<huella SHA-256 del derivado>  <versión>` de cada versión congelada. Lo escribe `derivar.py --congelar`.
+2af852e591ede5701adf7599be69d992fe6112d55fc44459e71feab9f8c60d7b  1.1.0-rc1

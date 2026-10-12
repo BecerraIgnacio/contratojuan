@@ -1,0 +1,13 @@
+# Mock Prism del contrato /v1 de Historia Viva (DEC-50). Lo levanta `node ejecutar-contrato.mjs`; a mano: docker compose up
+# Sin Docker: npx @stoplight/prism-cli@5.16.0 mock openapi-agentes.yaml
+# Docker Hub no publica stoplight/prism:5.16.0 (la última imagen es 5.15.10): corre el mismo paquete npm sobre Node.
+name: historiaviva-mock-v1
+services:
+  prism:
+    image: node:22.23.3-alpine
+    init: true
+    command: npx --yes @stoplight/prism-cli@5.16.0 mock -h 0.0.0.0 /contrato/openapi-agentes.yaml
+    volumes:
+      - ./openapi-agentes.yaml:/contrato/openapi-agentes.yaml:ro
+    ports:
+      - "127.0.0.1:4010:4010"

@@ -1,0 +1,1995 @@
+# Generado por .scratch/mvp/contrato-v1/derivar.py desde .scratch/mvp/openapi.yaml. No editar a mano.
+openapi: 3.1.0
+info:
+  title: Historia Viva — API para Agentes externos (/v1)
+  version: 1.1.0-rc1
+  summary: Contrato `/v1` entre Historia Viva y el Agente 1 del Proyecto Centenario. Borrador `contrato-a1/v1.1.0-rc1`.
+  description: |
+    Historia Viva custodia el Acervo histórico de la Facultad de Ingeniería del Ejército (FIE). Esta API es la que usan
+    los Agentes externos (el Agente 1 del Proyecto Centenario) para consultar el Acervo validado y enviar Aportes. Credencial: `Authorization: Bearer hv_<8 hex>_<43 base64url>` (Token de Agente) con su alcance.
+
+    **Dos reglas que no se negocian.**
+    1. Solo sale material Validado y no retirado. Un Aporte Validado es una Pieza más y vuelve por `/v1` como cualquiera
+       (DEC-134). Una Pieza inexistente, no Validada o retirada responde `404 pieza_no_disponible` con el mismo cuerpo.
+    2. Todo lo que entra queda Pendiente: un Aporte espera validación humana. Si trae etiquetas de control, se rechaza con
+       `422 aporte_rechazado` (DEC-133).
+
+    **Convenciones.**
+    - Ids con prefijo y UUID: `pza_<uuid>`, `frg_<uuid>`, `apt_<uuid>`, `lot_<uuid>`, `efe_<uuid>`, `rel_<uuid>`. El patrón
+      del esquema es el del contrato 1.0.0; el UUID lo valida el servidor.
+    - Fechas de la Pieza: `YYYY-MM-DD` con `precision_fecha` (`dia`, `mes`, `anio`, `decada` y, desde la 1.1, `rango`).
+      Momentos: RFC 3339 UTC con `Z`.
+    - Error: `{codigo, mensaje, solicitud_id}`. Toda respuesta lleva `X-Solicitud-Id: req_<ulid>`, el mismo valor que
+      `solicitud_id`; sirve para seguir una solicitud de punta a punta entre los dos agentes (DIR-86).
+    - Orden de chequeos: `401 token → 503 interruptor → 403 alcance → 429 límite → 400 forma (y 422 contenido) → 404`.
+    - `url_original` se arma con `HV_URL_PUBLICA` (`{HV_URL_PUBLICA}/validar.html?pieza=<uuid>`) y la abre una persona
+      de la FIE con su sesión. Mientras no haya servidor, el enlace solo abre en la PC del alumno.
+    - Nada de `DELETE`. Todo `4xx` es definitivo: no se reintenta sin corregir el pedido.
+
+    **Propuestas del borrador.** Las diferencias con la 1.0.0 están en `x-diferencias-contrato`; las que llevan
+    `propuesta: true` son valores abiertos que proponemos y se acuerdan antes del congelado: `precision_fecha` `rango`,
+    la forma de los ids, los tipos nuevos de `TipoPieza`, los códigos de error nuevos, el 400 por parámetros
+    desconocidos, la idempotencia sin vencimiento, `url_original`, los límites de consultas y la rotación de token.
+
+    **Pendiente de C48 (propuesta).** `GET /v1/efemerides`, `GET /v1/relatos` (alcance `efemerides:leer`), el Aporte
+    Validado que vuelve por `/v1` y el `422 aporte_rechazado` son una propuesta que todavía no aceptaste: las operaciones
+    y los ejemplos llevan `x-pendiente: C48`.
+
+    **Mock.** Junto con este archivo va `compose.yaml`: `docker compose up` levanta Prism 5.16.0 en
+    `http://localhost:4010` (sin Docker: `npx @stoplight/prism-cli@5.16.0 mock openapi-agentes.yaml`). Cada escenario
+    es un ejemplo con nombre de este archivo y se pide con `Prefer: code=<status>, example=<nombre>`, sobre un pedido
+    válido (token `Bearer`, parámetros obligatorios, `Idempotency-Key` y cuerpo en `POST /v1/aportes`); por ejemplo,
+    `Prefer: code=429, example=limite` o `Prefer: code=422, example=aporteRechazado`.
+
+    **Prism no guarda estado.** No distingue el primer envío de un reintento ni cuenta consultas: el `201` y el `200`
+    de `POST /v1/aportes` se fuerzan con `Prefer`. La idempotencia y los cupos se prueban contra la API real, en la
+    sesión presencial. El `422 aporte_rechazado` solo sale con `Prefer`: la detección real de etiquetas de control se
+    prueba contra la API. En el mock, `X-Solicitud-Id` es fija y no coincide con el `solicitud_id` del cuerpo; en la
+    API real son el mismo valor. El `503` del mock trae siempre `Retry-After: 300`, también en `motorCaido`; la API
+    real manda `30` con base o motor caídos. El mock acepta cualquier token `Bearer` y no tiene `500`.
+  contact:
+    name: Ignacio Becerra Mas Roca — responsable de Historia Viva (PPS)
+    email: ignaciobcerra@gmail.com
+  license:
+    name: Uso interno FIE / UNDEF
+    identifier: LicenseRef-FIE-Interno
+servers:
+- url: http://localhost:4010
+  description: |
+    Mock Prism sobre este archivo, en tu máquina (DEC-50). Elegí el escenario con `Prefer: code=<status>, example=<nombre>`.
+- url: http://localhost:8000
+  description: |
+    La PC del alumno (DEC-119), donde corre la API real durante el PPS; las pruebas del Agente 1 se hacen ahí, en una
+    sesión presencial en la misma red. Es el valor por defecto de `HV_URL_PUBLICA`, con el que se arma `url_original`.
+- url: https://{host}
+  description: |
+    Servidor de la universidad, después del PPS (DEC-119). Arranca vacío; se prueba con una receta que levanta el
+    sistema en una VM Linux limpia (criterio de cierre de R9). No existe durante el PPS.
+  variables:
+    host:
+      default: historia-viva.fie.local
+      description: Host del servidor de la universidad (a definir con IT).
+tags:
+- name: Agentes
+  description: API `/v1` para Agentes externos (Agente 1 del Proyecto Centenario). Solo `application/json` y errores `Error`.
+x-excepcion-rfc9457:
+  alcance: /v1
+  decision: DEC-34
+  explicacion: |
+    `/api`, `/api/admin` y `/auth` (JSON) responden errores con RFC 9457 (`application/problem+json`, esquema
+    `Problema`). `/v1` NO lo hace: conserva el esquema `Error` del contrato cerrado con Juan
+    (`{codigo, mensaje, solicitud_id}`, `additionalProperties: false`). El contrato 1.0.0 prohíbe propiedades
+    extra en `Error` y el cliente del Agente 1 ya decide por `codigo`; cambiar el formato rompería un contrato
+    acordado. Resultado: un catálogo interno de errores y dos serializadores. Los `codigo` de `/v1` son los del
+    `openapi.yaml` 1.0.0 (`parametros_invalidos`, `idempotency_key_reutilizada`, `token_invalido`,
+    `operacion_no_permitida`, `pieza_no_disponible`, `limite_superado`, `servicio_no_disponible`) más
+    `fuente_inexistente` y `ruta_inexistente` (DEC-67) y, desde el 10-oct, `aporte_rechazado` (422, DEC-133, R-29; pendiente de
+    C48). En `/v1` el cuerpo grande y la cabecera ausente son 400 `parametros_invalidos` (no 413) y una falla no prevista
+    es 503 (no 500).
+x-diferencias-contrato:
+- tema: Formato de error (excepción RFC 9457)
+  contrato: '`{codigo, mensaje, solicitud_id}`; `Error` con `additionalProperties:false`.'
+  mvp: '`/v1` conserva ese formato; `/api` y `/auth` usan RFC 9457. Un catálogo interno, dos serializadores. Este YAML lo
+    documenta como diferencia explícita (`x-excepcion-rfc9457`).'
+  cual_manda: Contrato en `/v1`; RFC 9457 en `/api` y `/auth`.
+  avisar_a_juan: No (no cambia nada para él).
+- tema: precision_fecha
+  propuesta: true
+  contrato: 4 valores (`dia`, `mes`, `anio`, `decada`).
+  mvp: '5 valores: suma `rango` («entre 2015 y 2019»). Regla de redacción: «entre X y Y» (DEC-60).'
+  cual_manda: MVP (aditivo; rompe clientes estrictos con enum cerrado).
+  avisar_a_juan: Sí.
+- tema: Forma de los ids
+  propuesta: true
+  contrato: Strings con patrón `^pza_[A-Za-z0-9._-]{1,60}$` para la Pieza; los ejemplos usan `pza_2016-0412`, `frg_01H9…-0003`,
+    `apt_2026-0475`.
+  mvp: '`pza_<uuid>`, `frg_<uuid>`, `apt_<uuid>`, `lot_<uuid>` (DEC-62). Este YAML conserva el patrón del contrato 1.0.0 (`^pza_[A-Za-z0-9._-]{1,60}$`;
+    DEC-146 punto 18) y el UUID se valida dentro del codec; un id con forma inválida es 400 `parametros_invalidos`. Para `frg_`,
+    `apt_`, `lot_` y `efe_` se usa el mismo patrón con su prefijo (el contrato 1.0.0 no fija patrón). Los ejemplos pasan a
+    UUID.'
+  cual_manda: Patrón del contrato 1.0.0; el UUID lo valida el codec.
+  avisar_a_juan: Sí (solo que los ejemplos cambian).
+- tema: TipoPieza
+  propuesta: true
+  contrato: 'Enum abierto de 5: `fotografia`, `acta`, `resolucion`, `convenio`, `memoria`.'
+  mvp: '9 valores: suma `nota`, `plano`, `planilla`, `video` (SUPUESTO; consultas C4, C23, C24). Los tipos los siembra la
+    migración (DEC-105); `POST /api/admin/tipos` queda fuera del MVP y, si se agregara, sube la versión menor del contrato.'
+  cual_manda: MVP (enum abierto, se versiona).
+  avisar_a_juan: Sí.
+- tema: Códigos de error de /v1
+  propuesta: true
+  contrato: '`parametros_invalidos`, `idempotency_key_reutilizada`, `token_invalido`, `operacion_no_permitida`, `pieza_no_disponible`,
+    `limite_superado`, `servicio_no_disponible`.'
+  mvp: 'Suma `fuente_inexistente` (400) y `ruta_inexistente` (404). Sin 413 ni 500: el cuerpo grande y la cabecera ausente
+    son `parametros_invalidos`; la falla no prevista es 503.'
+  cual_manda: MVP (aditivo).
+  avisar_a_juan: 'Sí (informativo: todo 4xx no se reintenta).'
+- tema: Parámetros desconocidos
+  propuesta: true
+  contrato: No lo dice.
+  mvp: 400 `parametros_invalidos` (un `limit` mal escrito no se ignora).
+  cual_manda: MVP.
+  avisar_a_juan: Sí.
+- tema: Idempotencia
+  propuesta: true
+  contrato: «Recuerda 30 días»; un reintento posterior crea un aporte nuevo.
+  mvp: Se recuerda sin vencimiento (`hv_app` no tiene `DELETE`). Se propone redactar «al menos 30 días».
+  cual_manda: MVP (cumple más).
+  avisar_a_juan: Sí.
+- tema: Aportes Validados en /v1 (DEC-134; pendiente de C48)
+  contrato: '`GET /v1/piezas/{id}` devuelve 404 «hasta que una persona la valide»; después sí.'
+  mvp: El Aporte Validado vuelve por `/v1/piezas/{id}` y `/v1/fragmentos` como cualquier Pieza. Queda sin efecto la exclusión
+    de DEC-17 y su 404 permanente. Coincide con el contrato 1.0.0.
+  cual_manda: Contrato 1.0.0 (el MVP deja de apartarse). Pendiente de C48.
+  avisar_a_juan: Sí (C48; retira el aviso de C33 sobre el 404 permanente).
+- tema: url_original
+  propuesta: true
+  contrato: Enlace a Drive; el Agente 1 hoy no puede abrirlo.
+  mvp: URL de la Pieza en Historia Viva, armada con `HV_URL_PUBLICA` (`{HV_URL_PUBLICA}/validar.html?pieza=<uuid>`), que abre
+    una persona de la FIE con su sesión; el Agente 1 no puede abrirla (DEC-35). Mientras no haya servidor, el enlace solo
+    abre en la PC del alumno (DEC-119, DEC-146 punto 10); se declara en el contrato. La réplica a Drive entra y se activa
+    con C14 (DEC-36).
+  cual_manda: MVP (campo requerido, `uri`).
+  avisar_a_juan: Sí.
+- tema: Límite de consultas
+  propuesta: true
+  contrato: Número sin acordar; a proponer.
+  mvp: 60 consultas/min, 10 aportes/min y 2 búsquedas en vuelo por token (ventana fija de 60 s en memoria); `RateLimit-Limit`,
+    `RateLimit-Remaining`, `RateLimit-Reset` y `Retry-After`.
+  cual_manda: MVP (propuesta; se ajusta con la medición).
+  avisar_a_juan: Sí.
+- tema: Orden de chequeos
+  contrato: No lo fija.
+  mvp: 401 → 503 → 403 → 429 → 400 → 404 (DEC-28).
+  cual_manda: MVP.
+  avisar_a_juan: Sí (informativo).
+- tema: 503 del interruptor
+  contrato: '`Retry-After` «si se conocen».'
+  mvp: 'Siempre `Retry-After: 300`; sin motivo en el cuerpo (DEC-78). Base o motor caído: `Retry-After: 30`.'
+  cual_manda: MVP.
+  avisar_a_juan: 'Sí (informativo: reintentar con la misma `Idempotency-Key`).'
+- tema: Rotación de token
+  propuesta: true
+  contrato: «Ventana de solapamiento acordada por las partes».
+  mvp: N tokens por agente, formato `hv_<8 hex>_<43 base64url>`, vencen a los 180 días; ventana de solape propuesta de 7 días
+    (SUPUESTO).
+  cual_manda: MVP.
+  avisar_a_juan: Sí.
+- tema: Mock
+  contrato: «Endpoint o mock»; `server` `mock.historia-viva.fie.local`.
+  mvp: 'Prism local sobre el YAML derivado, corriendo en la máquina de Juan como herramienta para probar su cliente; `server`
+    `http://localhost:4010` (DEC-50). Es la rebanada R0, la primera (DEC-118): el OpenAPI `/v1` se congela por tag el 30-oct
+    (contrato con Juan §9). Escenarios nuevos del 10-oct: `/v1/efemerides` y `422 aporte_rechazado`.'
+  cual_manda: MVP.
+  avisar_a_juan: Sí.
+- tema: Host y transporte
+  contrato: '`https://{host}` en `historia-viva.fie.local`.'
+  mvp: 'La PC del alumno, sin servidor externo ni túnel (alternativa descartada: VPS con Tailscale o Funnel; DEC-119). Juan
+    desarrolla contra el mock y las pruebas reales del Agente 1 se hacen en una sesión presencial en la misma red. Después
+    del PPS todo pasa al servidor de la universidad, que arranca vacío.'
+  cual_manda: MVP.
+  avisar_a_juan: Sí (sesión presencial para la integración; C48).
+- tema: Reapertura de una Ficha Validada
+  contrato: No la menciona.
+  mvp: '`Validada → Incompleta` si falta un obligatorio: el `pieza_id` pasa a 404 y se desindexa.'
+  cual_manda: MVP (paridad).
+  avisar_a_juan: Sí (un 404 posterior a un 200 es válido, no es un error del cliente).
+- tema: Borrado lógico
+  contrato: 404 si no está Validada.
+  mvp: Una Pieza retirada (borrado lógico) deja de existir para `/v1` (mismo 404).
+  cual_manda: MVP.
+  avisar_a_juan: Sí (mismo punto que la reapertura).
+- tema: validada_por
+  contrato: Handle institucional (`mgarcia`).
+  mvp: Parte local del email institucional (SUPUESTO).
+  cual_manda: MVP.
+  avisar_a_juan: Sí (si lo muestra en público).
+- tema: Pieza fuente no Validada
+  contrato: '`400` si no existe.'
+  mvp: 'Existente pero no Validada: el mismo 400 `fuente_inexistente`. Un Aporte Validado es una fuente válida (DEC-134).
+    `fragmentos_fuente` solo valida forma, no existencia (DEC-146 punto 19).'
+  cual_manda: MVP.
+  avisar_a_juan: Sí (informativo).
+- tema: Planillas y videos en /v1
+  contrato: No los prevé.
+  mvp: 'Planilla: `seccion` = nombre de la hoja, `pagina` = `null`. Video: `pagina` = `null`; `seccion` = marca `HH:MM:SS`
+    si el fragmento la tiene, si no `null`. `texto` es lo que escribió una persona. Sin cambio de esquema.'
+  cual_manda: MVP.
+  avisar_a_juan: Sí (informativo).
+- tema: Alerta de inyección
+  contrato: '`Pieza` cerrada sin campos internos.'
+  mvp: No sale por `/v1`; exponerla (`alerta_inyeccion` por fragmento) es la consulta C33 (v1.2).
+  cual_manda: Contrato.
+  avisar_a_juan: Sí (C33).
+- tema: Tiempo de búsqueda
+  contrato: Objetivo menor a 15 s; timeout del cliente mayor.
+  mvp: El servidor corta a los 12 s con 503 (nunca 200 vacío), para que el Agente 1 distinga «no hay material» de «falló»
+    (DEC-69).
+  cual_manda: MVP (SUPUESTO).
+  avisar_a_juan: Sí (informativo).
+- tema: solicitud_id
+  contrato: Requerido por prosa; el esquema `Error` solo exige `codigo` y `mensaje`.
+  mvp: Siempre presente en errores y en `X-Solicitud-Id` de toda respuesta; este YAML lo marca `required`.
+  cual_manda: MVP (el YAML lo marca requerido).
+  avisar_a_juan: No.
+- tema: Versión del YAML
+  contrato: 1.0.0.
+  mvp: 1.1.0 (tag `contrato-a1/v1.1.0`); `GET /v1/salud` de los informes no se agrega. La fuente `.scratch/mvp/openapi.yaml`
+    lleva `1.1.0-mvp` porque además describe la parte web; el derivado para Juan, `1.1.0-rc1` hasta el congelado. Lo del 10-oct
+    es aditivo (un endpoint y un código nuevos) y entra en la misma 1.1.0 si C48 se cierra antes del congelado del 30-oct.
+  cual_manda: MVP.
+  avisar_a_juan: Sí (C27, C48).
+- tema: Dos OpenAPI (agregada por esta redacción)
+  contrato: '`docs/proyecto/openapi.yaml` es solo el contrato `/v1`.'
+  mvp: '`.scratch/mvp/openapi.yaml` describe web + agentes y de él se deriva `openapi-agentes.yaml` (solo `/v1`, con `server`
+    `http://localhost:4010`). Juan no ve login ni administración (DEC-77).'
+  cual_manda: MVP hasta congelar el contrato; después se mueve a `docs/proyecto/`.
+  avisar_a_juan: No (Juan solo recibe el derivado).
+- tema: Parámetros nuevos de GET /v1/fragmentos (agregada por esta redacción)
+  contrato: '`q`, `desde`, `hasta`, `tipo`, `limite`; `Fragmento.precision_fecha` con 4 valores.'
+  mvp: 'Sin parámetros nuevos. Aditivos en las respuestas: cabeceras `RateLimit-*`, `Retry-After`, `X-Solicitud-Id`; `Retry-After`
+    de 429 y 503 documentado; `Idempotency-Key` sigue requerida en `POST /v1/aportes`.'
+  cual_manda: MVP.
+  avisar_a_juan: 'Sí (informativo: son cabeceras de respuesta).'
+- tema: Integración con el Agente 1 (DEC-83, agregada por la auditoría)
+  contrato: Pruebas contra Historia Viva con los tres endpoints (`fragmentos`, `piezas`, `aportes`), según el cronograma del
+    §9.
+  mvp: El cronograma de pruebas del contrato §9 no condiciona este diseño; los endpoints de `/v1` son reales (los tres del
+    contrato más `efemerides`). Las pruebas reales se hacen en una sesión presencial (DEC-119).
+  cual_manda: MVP.
+  avisar_a_juan: Sí (C37, C48).
+- tema: Efemérides por /v1 (DEC-130; pendiente de C48)
+  propuesta: true
+  contrato: 'Punto 7 y §11: «la efeméride deja de ser un producto de Historia Viva»; el Agente 1 consulta por período y redacta
+    la suya. Sin endpoint de efemérides.'
+  mvp: '`GET /v1/efemerides?desde&hasta` devuelve solo las Efemérides **Aprobadas** (redactadas por un modelo de Historia
+    Viva y firmadas por una persona de la SEU). Reabre C12. `desde` y `hasta` obligatorios, rango máximo de 92 días, solapamiento
+    con el intervalo de difusión de cada efeméride (día: la misma fecha; mes: el mes entero), ids `efe_<uuid>` y alcance de
+    token propio `efemerides:leer` (R-11). Falta que Juan lo acepte (C48).'
+  cual_manda: MVP (anteproyecto págs. 7, 8, 22, 25). Pendiente de C48.
+  avisar_a_juan: 'Sí (C48: renegociar §1 punto 7 y §11).'
+- tema: Rechazo de Aportes con etiquetas de control (DEC-133; pendiente de C48)
+  propuesta: true
+  contrato: '`POST /v1/aportes` no define ningún rechazo por contenido; solo 400, 401, 403, 429 y 503 (DEC-34).'
+  mvp: 'Un Aporte cuyo contenido trae etiquetas de control de una lista cerrada (`### Instruction:`, `[SYSTEM]`, `<|im_start|>`,
+    `<|system|>`, `[INST]` y variantes) se rechaza con `422 aporte_rechazado`: no crea Pieza ni registro de idempotencia.
+    El 422 se evalúa junto con el 400 (forma y contenido), antes del 404. El código va en snake_case como el resto de `/v1`
+    (R-29).'
+  cual_manda: 'MVP (aditivo: un código y un status nuevos). Pendiente de C48.'
+  avisar_a_juan: Sí (C48; amplía C27 y C33).
+- tema: Alcance del token para Efemérides y Relatos (R-11)
+  propuesta: true
+  contrato: 'Alcances: `fragmentos:leer`, `piezas:leer`, `aportes:escribir`.'
+  mvp: Alcance nuevo `efemerides:leer`, que cubre `GET /v1/efemerides` y `GET /v1/relatos`. Los tokens existentes no lo tienen.
+  cual_manda: MVP (aditivo). Pendiente de C48.
+  avisar_a_juan: Sí (C48).
+- tema: Relatos por /v1 (DEC-147; pendiente de C48)
+  propuesta: true
+  contrato: Sin endpoint de relatos.
+  mvp: '`GET /v1/relatos?desde&hasta` devuelve solo los Relatos **Aprobados** (texto de difusión sobre un hito, no atado a
+    una fecha), por fecha de aprobación, con `desde`/`hasta` obligatorios, rango máximo de 92 días, ids `rel_<uuid>` y alcance
+    `efemerides:leer`.'
+  cual_manda: MVP (aditivo). Pendiente de C48.
+  avisar_a_juan: Sí (C48).
+paths:
+  /v1/fragmentos:
+    get:
+      tags:
+      - Agentes
+      operationId: buscarFragmentos
+      summary: Busca fragmentos de Fichas Validadas.
+      description: |
+        Punto de entrada de toda consulta. Recibe una consulta en lenguaje natural y devuelve fragmentos de Fichas
+        Validadas, cada uno con su cita al archivo original.
+
+        El rango de fechas y el tipo se aplican como filtro duro antes de la búsqueda semántica (por solapamiento de
+        rangos). Un resultado sin coincidencias es `200` con `fragmentos: []` y `total: 0`: no es un error. Si no se puede
+        responder (embedding caído o más de 12 s) es `503`, **nunca** un `200` vacío.
+
+        Solo salen Piezas Validadas y no retiradas, de cualquier vía de ingreso: un Aporte Validado es una Pieza más y
+        vuelve por acá como cualquiera (DEC-134; pendiente de C48). La alerta de inyección no sale (C33). Un parámetro
+        desconocido es `400 parametros_invalidos`.
+
+        Las Efemérides Aprobadas se piden por `GET /v1/efemerides` (DEC-130; pendiente de C48). Esta búsqueda sigue siendo la
+        vía para armar una pieza temática o una efeméride propia con `precision_fecha`.
+
+        Planillas: `seccion` es el nombre de la hoja y `pagina` es `null`. Video: `pagina` es `null`, `seccion` es la marca
+        `HH:MM:SS` si el fragmento la tiene (si no, `null`) y `texto` lo escribió una persona.
+
+        **Cubre:** CU-12, RF-23, RF-24, RF-26.
+      x-alcance: entra
+      security:
+      - token_agente: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        description: |
+          Consulta en lenguaje natural. Se resuelve por búsqueda semántica sobre el cuerpo de las Fichas Validadas. Si se
+          omite, hay que enviar al menos `desde` o `hasta`: una consulta sin ningún criterio responde `400`.
+        schema:
+          type: string
+          minLength: 3
+          maxLength: 500
+        example: convenios de cooperación con universidades nacionales
+      - name: desde
+        in: query
+        required: false
+        description: 'Filtro duro: excluye toda Pieza cuya `fecha_fin` sea anterior a esta fecha.'
+        schema:
+          type: string
+          format: date
+        example: '2015-01-01'
+      - name: hasta
+        in: query
+        required: false
+        description: 'Filtro duro: excluye toda Pieza cuya `fecha_inicio` sea posterior a esta fecha.'
+        schema:
+          type: string
+          format: date
+        example: '2019-12-31'
+      - name: tipo
+        in: query
+        required: false
+        description: 'Filtro duro por tipo de Pieza. Enum abierto: ver el esquema `TipoPieza`.'
+        schema:
+          $ref: '#/components/schemas/TipoPieza'
+      - name: limite
+        in: query
+        required: false
+        description: Cantidad máxima de fragmentos a devolver.
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 10
+        example: 10
+      responses:
+        '200':
+          description: Búsqueda resuelta. Puede venir vacía.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Solicitud-Id:
+              $ref: '#/components/headers/XSolicitudId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaFragmentos'
+              examples:
+                conResultados:
+                  summary: Consulta con resultados (convenio 2016, acta 2018, foto de 1972)
+                  value:
+                    total: 3
+                    limite: 10
+                    fragmentos:
+                    - fragmento_id: frg_e41d0c7a-2f95-5b3e-a8c1-96d7f0b3c254
+                      pieza_id: pza_5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                      texto: En la ciudad de Buenos Aires, a los once días del mes de abril de 2016, se suscribe el convenio
+                        marco de cooperación académica entre la Facultad de Ingeniería del Ejército y la Universidad Tecnológica
+                        Nacional, con el objeto de articular carreras de posgrado en ingeniería de materiales.
+                      fecha_inicio: '2016-04-11'
+                      fecha_fin: '2016-04-11'
+                      precision_fecha: dia
+                      tipo: convenio
+                      resumen_pieza: Convenio marco de cooperación académica entre la FIE y la Universidad Tecnológica Nacional,
+                        firmado en abril de 2016.
+                      url_original: http://localhost:8000/validar.html?pieza=5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                      validada_el: '2026-11-10T15:22:41Z'
+                      pagina: 1
+                      seccion: Cláusula primera — Objeto
+                    - fragmento_id: frg_a7c93e15-0b6d-4f28-9e41-3d5f7a9c1b86
+                      pieza_id: pza_c8e1f402-6a3d-4b95-8f17-2e4a6c8d0b93
+                      texto: El Consejo Académico aprueba por unanimidad la renovación del convenio con la Universidad Nacional
+                        de La Plata para prácticas profesionales supervisadas de la carrera de Ingeniería Civil.
+                      fecha_inicio: '2018-09-01'
+                      fecha_fin: '2018-09-30'
+                      precision_fecha: mes
+                      tipo: acta
+                      resumen_pieza: Acta del Consejo Académico de septiembre de 2018, con la renovación de convenios de prácticas
+                        profesionales supervisadas.
+                      url_original: http://localhost:8000/validar.html?pieza=c8e1f402-6a3d-4b95-8f17-2e4a6c8d0b93
+                      validada_el: '2026-11-10T16:05:03Z'
+                      pagina: 4
+                      seccion: null
+                    - fragmento_id: frg_30f6b2d8-9c14-4a7e-b583-e1d7a9c3f560
+                      pieza_id: pza_d2a4c6e8-1f3b-4579-8a0c-b2d4f6a8c0e1
+                      texto: Fotografía en blanco y negro de un grupo de cadetes formados frente a un edificio durante el
+                        acto de colación de grados.
+                      fecha_inicio: '1972-01-01'
+                      fecha_fin: '1972-12-31'
+                      precision_fecha: anio
+                      tipo: fotografia
+                      resumen_pieza: Acto de colación de grados en el patio central, 1972.
+                      url_original: http://localhost:8000/validar.html?pieza=d2a4c6e8-1f3b-4579-8a0c-b2d4f6a8c0e1
+                      validada_el: '2026-11-11T09:40:12Z'
+                      pagina: null
+                      seccion: null
+                precisionDecada:
+                  summary: Fragmento con precisión `decada` (años 60)
+                  value:
+                    total: 1
+                    limite: 10
+                    fragmentos:
+                    - fragmento_id: frg_5c8e0a24-7b31-4d96-a2f8-c0e4b6d8f173
+                      pieza_id: pza_9e3b5d71-2c48-4a60-b9f1-d3a5c7e9b024
+                      texto: Plano general de los laboratorios de ensayo de materiales, tal como estaban en la década del
+                        sesenta.
+                      fecha_inicio: '1960-01-01'
+                      fecha_fin: '1969-12-31'
+                      precision_fecha: decada
+                      tipo: plano
+                      resumen_pieza: Plano de los laboratorios de ensayo de materiales, años 60.
+                      url_original: http://localhost:8000/validar.html?pieza=9e3b5d71-2c48-4a60-b9f1-d3a5c7e9b024
+                      validada_el: '2026-11-11T10:12:30Z'
+                      pagina: null
+                      seccion: null
+                precisionRango:
+                  summary: Fragmento con precisión `rango` (2015 a 2019)
+                  value:
+                    total: 1
+                    limite: 10
+                    fragmentos:
+                    - fragmento_id: frg_8b1d3f57-0e92-4c64-a7b3-f5c9e1a3d708
+                      pieza_id: pza_1a3c5e70-9d24-4b86-8c02-e4f6a8b0d2c4
+                      texto: Memoria de gestión con los convenios de cooperación vigentes entre 2015 y 2019.
+                      fecha_inicio: '2015-01-01'
+                      fecha_fin: '2019-12-31'
+                      precision_fecha: rango
+                      tipo: memoria
+                      resumen_pieza: Memoria de gestión del quinquenio 2015-2019.
+                      url_original: http://localhost:8000/validar.html?pieza=1a3c5e70-9d24-4b86-8c02-e4f6a8b0d2c4
+                      validada_el: '2026-11-11T11:30:00Z'
+                      pagina: 12
+                      seccion: Capítulo 3 — Convenios
+                planillaConSeccion:
+                  summary: Fragmento de una planilla (`seccion` = nombre de la hoja, `pagina` nula)
+                  value:
+                    total: 1
+                    limite: 10
+                    fragmentos:
+                    - fragmento_id: frg_f2a4c6e8-3b15-4d79-8c0e-a1b3d5f7e902
+                      pieza_id: pza_7d9f1b35-4a62-4c80-9e13-b5d7f9a1c346
+                      texto: 'Apellido: Gómez. Nombre: Lucía. Carrera: Ingeniería Civil. Año de ingreso: 2010.'
+                      fecha_inicio: '2010-01-01'
+                      fecha_fin: '2010-12-31'
+                      precision_fecha: anio
+                      tipo: planilla
+                      resumen_pieza: Listado de ingresantes de 2010 por carrera.
+                      url_original: http://localhost:8000/validar.html?pieza=7d9f1b35-4a62-4c80-9e13-b5d7f9a1c346
+                      validada_el: '2026-11-12T08:45:19Z'
+                      pagina: null
+                      seccion: Hoja «Ingresantes 2010»
+                videoDescrito:
+                  summary: Fragmento de un video (`texto` escrito por una persona, `seccion` con marca de tiempo)
+                  value:
+                    total: 1
+                    limite: 10
+                    fragmentos:
+                    - fragmento_id: frg_0c2e4a68-5d37-4f91-b8a0-d2f4b6c8e135
+                      pieza_id: pza_a41f3b7c-6d28-4e90-b5a1-3c7e9f1d2b48
+                      texto: El decano entrega los diplomas a los egresados; al fondo se ve la banda de música del Ejército.
+                      fecha_inicio: '1998-12-15'
+                      fecha_fin: '1998-12-15'
+                      precision_fecha: dia
+                      tipo: video
+                      resumen_pieza: Acto de colación de grados de 1998 (video).
+                      url_original: http://localhost:8000/validar.html?pieza=a41f3b7c-6d28-4e90-b5a1-3c7e9f1d2b48
+                      validada_el: '2026-11-12T12:02:44Z'
+                      pagina: null
+                      seccion: 00:12:30
+                sinResultados:
+                  summary: Consulta sin coincidencias
+                  value:
+                    total: 0
+                    limite: 10
+                    fragmentos: []
+        '400':
+          description: |
+            Solicitud mal formada: sin criterio, parámetro fuera de rango o desconocido, `limite` mayor a 50, `desde`
+            posterior a `hasta`, `tipo` fuera del enum. No se reintenta sin corregirla.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Solicitud-Id:
+              $ref: '#/components/headers/XSolicitudId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                sinCriterio:
+                  summary: Consulta sin ningún criterio
+                  value:
+                    codigo: parametros_invalidos
+                    mensaje: La consulta requiere al menos uno de los parámetros q, desde o hasta.
+                    solicitud_id: req_01JA3X2E9F5G
+                parametroDesconocido:
+                  summary: Parámetro que el contrato no define
+                  value:
+                    codigo: parametros_invalidos
+                    mensaje: 'Parámetro desconocido: limit. ¿Quisiste decir limite?'
+                    solicitud_id: req_01JA3X2E9F6H
+        '401':
+          $ref: '#/components/responses/V1NoAutenticado'
+        '403':
+          $ref: '#/components/responses/V1NoAutorizado'
+        '404':
+          $ref: '#/components/responses/V1RutaInexistente'
+        '429':
+          $ref: '#/components/responses/V1DemasiadasConsultas'
+        '503':
+          $ref: '#/components/responses/V1NoDisponible'
+  /v1/piezas/{pieza_id}:
+    get:
+      tags:
+      - Agentes
+      operationId: obtenerPieza
+      summary: Devuelve una Pieza Validada completa.
+      description: |
+        Amplía una recuperación insuficiente. Devuelve la Ficha Validada completa de la Pieza: sus campos duros, el cuerpo
+        íntegro y todos sus fragmentos. Forma cerrada (`additionalProperties: false`).
+
+        Un Aporte Validado se devuelve como cualquier Pieza (DEC-134; pendiente de C48). Si la Pieza no existe, no está
+        Validada o está retirada, la respuesta es `404 pieza_no_disponible` con el mismo cuerpo en todos los casos. Un `404`
+        posterior a un `200` es válido: una Ficha reabierta o retirada deja de ser pública.
+
+        **Cubre:** CU-13, RF-24.
+      x-alcance: entra
+      security:
+      - token_agente: []
+      parameters:
+      - name: pieza_id
+        in: path
+        required: true
+        description: Identificador estable de la Pieza, tal como viene en cada fragmento.
+        schema:
+          $ref: '#/components/schemas/IdPiezaV1'
+        example: pza_5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+      responses:
+        '200':
+          description: Pieza Validada.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Solicitud-Id:
+              $ref: '#/components/headers/XSolicitudId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pieza'
+              examples:
+                convenio:
+                  summary: Convenio de 2016, con 3 fragmentos
+                  value:
+                    pieza_id: pza_5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                    tipo: convenio
+                    estado: Validada
+                    resumen: Convenio marco de cooperación académica entre la FIE y la Universidad Tecnológica Nacional, firmado
+                      en abril de 2016.
+                    texto: 'Convenio marco de cooperación académica. En la ciudad de Buenos Aires, a los once días del mes
+                      de abril de 2016, se suscribe el presente convenio entre la Facultad de Ingeniería del Ejército, representada
+                      por su Decano, y la Universidad Tecnológica Nacional, representada por su Rector. Cláusula primera —
+                      Objeto: articular carreras de posgrado en ingeniería de materiales. Cláusula segunda — Vigencia: cinco
+                      años, renovables por acuerdo expreso de las partes.'
+                    fecha_inicio: '2016-04-11'
+                    fecha_fin: '2016-04-11'
+                    precision_fecha: dia
+                    origen: Secretaría de Extensión Universitaria — archivo de convenios
+                    lote_id: lot_c3b8e7a4-1d2f-4e6a-b5c9-0a1b2c3d4e5f
+                    lote_nombre: Convenios institucionales 2015-2019
+                    url_original: http://localhost:8000/validar.html?pieza=5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                    validada_por: mgarcia
+                    validada_el: '2026-11-10T15:22:41Z'
+                    modo_validacion: individual
+                    fragmentos:
+                    - fragmento_id: frg_e41d0c7a-2f95-5b3e-a8c1-96d7f0b3c254
+                      pieza_id: pza_5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                      texto: En la ciudad de Buenos Aires, a los once días del mes de abril de 2016, se suscribe el convenio
+                        marco de cooperación académica entre la Facultad de Ingeniería del Ejército y la Universidad Tecnológica
+                        Nacional, con el objeto de articular carreras de posgrado en ingeniería de materiales.
+                      fecha_inicio: '2016-04-11'
+                      fecha_fin: '2016-04-11'
+                      precision_fecha: dia
+                      tipo: convenio
+                      resumen_pieza: Convenio marco de cooperación académica entre la FIE y la Universidad Tecnológica Nacional,
+                        firmado en abril de 2016.
+                      url_original: http://localhost:8000/validar.html?pieza=5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                      validada_el: '2026-11-10T15:22:41Z'
+                      pagina: 1
+                      seccion: Cláusula primera — Objeto
+                    - fragmento_id: frg_6d0f2b84-1c53-4e97-8a2b-f4a6c8e0d319
+                      pieza_id: pza_5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                      texto: 'Cláusula segunda — Vigencia: cinco años, renovables por acuerdo expreso de las partes.'
+                      fecha_inicio: '2016-04-11'
+                      fecha_fin: '2016-04-11'
+                      precision_fecha: dia
+                      tipo: convenio
+                      resumen_pieza: Convenio marco de cooperación académica entre la FIE y la Universidad Tecnológica Nacional,
+                        firmado en abril de 2016.
+                      url_original: http://localhost:8000/validar.html?pieza=5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                      validada_el: '2026-11-10T15:22:41Z'
+                      pagina: 1
+                      seccion: Cláusula segunda — Vigencia
+                    - fragmento_id: frg_b3d5f7a9-2e64-4c18-9a0d-c1e3a5b7f920
+                      pieza_id: pza_5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                      texto: Firman el Decano de la Facultad y el Rector de la Universidad Tecnológica Nacional.
+                      fecha_inicio: '2016-04-11'
+                      fecha_fin: '2016-04-11'
+                      precision_fecha: dia
+                      tipo: convenio
+                      resumen_pieza: Convenio marco de cooperación académica entre la FIE y la Universidad Tecnológica Nacional,
+                        firmado en abril de 2016.
+                      url_original: http://localhost:8000/validar.html?pieza=5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                      validada_el: '2026-11-10T15:22:41Z'
+                      pagina: 2
+                      seccion: Firmas
+                aporteValidado:
+                  summary: Propuesta (pendiente de C48). Aporte de un Agente externo, ya Validado por una persona (DEC-134)
+                  x-pendiente: C48
+                  value:
+                    pieza_id: pza_8d0a6c15-93e2-4b7f-a4d0-5e1f7c2b8a39
+                    tipo: nota
+                    estado: Validada
+                    resumen: Gacetilla por los diez años del convenio marco entre la FIE y la UTN.
+                    texto: La Facultad de Ingeniería del Ejército conmemora una década del convenio marco de cooperación académica
+                      suscripto con la Universidad Tecnológica Nacional en abril de 2016.
+                    fecha_inicio: '2026-04-11'
+                    fecha_fin: '2026-04-11'
+                    precision_fecha: dia
+                    origen: Agente 1 — Proyecto Centenario
+                    lote_id: null
+                    lote_nombre: null
+                    url_original: http://localhost:8000/validar.html?pieza=8d0a6c15-93e2-4b7f-a4d0-5e1f7c2b8a39
+                    validada_por: mgarcia
+                    validada_el: '2026-11-04T10:15:00Z'
+                    modo_validacion: individual
+                    fragmentos:
+                    - fragmento_id: frg_4a6c8e02-7b19-4d53-a8f1-c3e5a7b9d041
+                      pieza_id: pza_8d0a6c15-93e2-4b7f-a4d0-5e1f7c2b8a39
+                      texto: La Facultad de Ingeniería del Ejército conmemora una década del convenio marco de cooperación
+                        académica.
+                      fecha_inicio: '2026-04-11'
+                      fecha_fin: '2026-04-11'
+                      precision_fecha: dia
+                      tipo: nota
+                      resumen_pieza: Gacetilla por los diez años del convenio marco entre la FIE y la UTN.
+                      url_original: http://localhost:8000/validar.html?pieza=8d0a6c15-93e2-4b7f-a4d0-5e1f7c2b8a39
+                      validada_el: '2026-11-04T10:15:00Z'
+                      pagina: null
+                      seccion: null
+                videoAnalizadoPorPersona:
+                  summary: Video; el `texto` lo escribió una persona
+                  value:
+                    pieza_id: pza_a41f3b7c-6d28-4e90-b5a1-3c7e9f1d2b48
+                    tipo: video
+                    estado: Validada
+                    resumen: Acto de colación de grados de 1998 (video).
+                    texto: El decano entrega los diplomas a los egresados; al fondo se ve la banda de música del Ejército.
+                    fecha_inicio: '1998-12-15'
+                    fecha_fin: '1998-12-15'
+                    precision_fecha: dia
+                    origen: Archivo audiovisual SEU
+                    lote_id: null
+                    lote_nombre: null
+                    url_original: http://localhost:8000/validar.html?pieza=a41f3b7c-6d28-4e90-b5a1-3c7e9f1d2b48
+                    validada_por: aperez
+                    validada_el: '2026-11-12T12:02:44Z'
+                    modo_validacion: individual
+                    fragmentos:
+                    - fragmento_id: frg_0c2e4a68-5d37-4f91-b8a0-d2f4b6c8e135
+                      pieza_id: pza_a41f3b7c-6d28-4e90-b5a1-3c7e9f1d2b48
+                      texto: El decano entrega los diplomas a los egresados; al fondo se ve la banda de música del Ejército.
+                      fecha_inicio: '1998-12-15'
+                      fecha_fin: '1998-12-15'
+                      precision_fecha: dia
+                      tipo: video
+                      resumen_pieza: Acto de colación de grados de 1998 (video).
+                      url_original: http://localhost:8000/validar.html?pieza=a41f3b7c-6d28-4e90-b5a1-3c7e9f1d2b48
+                      validada_el: '2026-11-12T12:02:44Z'
+                      pagina: null
+                      seccion: 00:12:30
+        '400':
+          description: '`pieza_id` mal formado (no cumple el patrón `pza_<uuid>`).'
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Solicitud-Id:
+              $ref: '#/components/headers/XSolicitudId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                idMalFormado:
+                  value:
+                    codigo: parametros_invalidos
+                    mensaje: El identificador de la Pieza no tiene la forma pza_<uuid>.
+                    solicitud_id: req_01JA3X2E9F7J
+        '401':
+          $ref: '#/components/responses/V1NoAutenticado'
+        '403':
+          $ref: '#/components/responses/V1NoAutorizado'
+        '404':
+          $ref: '#/components/responses/V1NoEncontrada'
+        '429':
+          $ref: '#/components/responses/V1DemasiadasConsultas'
+        '503':
+          $ref: '#/components/responses/V1NoDisponible'
+  /v1/efemerides:
+    get:
+      tags:
+      - Agentes
+      operationId: listarEfemeridesAgente
+      summary: Propuesta (pendiente de C48). Efemérides Aprobadas cuya difusión cae en un período.
+      description: |
+        Devuelve las Efemérides **Aprobadas** cuyo intervalo de difusión (`difusion_desde`–`difusion_hasta`) se **solapa** con
+        el período `desde`–`hasta` (R-11). En las de día, el intervalo es esa misma fecha; en las de mes, el mes entero. Solo
+        salen Aprobadas: una Propuesta o una Descartada no existe para esta API (DEC-130), y tampoco una Aprobada marcada
+        «fuente retirada» (R-12). Cada Efeméride la redactó un modelo de Historia Viva a partir de Fichas Validadas y la
+        revisó y firmó una persona de la SEU; el Agente externo la recibe lista para usar y con las Piezas fuente para
+        citar. La alerta de inyección no sale por `/v1` (C33).
+
+        **Período.** `desde` y `hasta` son fechas completas y **obligatorios**; `hasta` mayor o igual a `desde` y el rango no
+        puede pasar de **92 días** (R-11). Sin Efemérides en el período es `200` con `efemerides: []`. Los ids llevan
+        prefijo `efe_<uuid>`. No pagina.
+
+        Este endpoint **reabre** el punto 7 del contrato 1.0.0 («la efeméride deja de ser un producto de Historia Viva»):
+        diferencia pendiente de C48 (ver `x-diferencias-contrato`). Alcance requerido: `efemerides:leer` (R-11), que cubre
+        también `GET /v1/relatos`.
+
+        **Cubre:** DIR-45, DEC-130. Rebanada R0 (mock) y R6 (real, R-43 a).
+      x-alcance: entra
+      x-pendiente: C48
+      security:
+      - token_agente: []
+      parameters:
+      - name: desde
+        in: query
+        required: true
+        description: Inicio del período (fecha completa). Se compara por solapamiento con el intervalo de difusión.
+        schema:
+          type: string
+          format: date
+        example: '2026-04-01'
+      - name: hasta
+        in: query
+        required: true
+        description: Fin del período (fecha completa). Mayor o igual a `desde`; el rango máximo es de 92 días.
+        schema:
+          type: string
+          format: date
+        example: '2026-04-30'
+      responses:
+        '200':
+          description: Efemérides Aprobadas del período. Puede venir vacía.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Solicitud-Id:
+              $ref: '#/components/headers/XSolicitudId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaEfemerides'
+              examples:
+                conResultados:
+                  summary: Una Efeméride de día y una de mes
+                  value:
+                    total: 2
+                    efemerides:
+                    - efemeride_id: efe_4e6a8c02-3d17-4b59-9f81-b3d5f7a9c124
+                      tipo: dia
+                      dia: 11
+                      mes: 4
+                      difusion_desde: '2026-04-11'
+                      difusion_hasta: '2026-04-11'
+                      titulo: Un día como hoy, 11 de abril
+                      texto: Un día como hoy, en 2016, la FIE y la UTN firmaron un convenio marco de cooperación académica.
+                      piezas_fuente:
+                      - pza_5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                      fragmentos_fuente:
+                      - frg_e41d0c7a-2f95-5b3e-a8c1-96d7f0b3c254
+                      aprobada_por: mgarcia
+                      aprobada_el: '2026-04-03T15:10:00Z'
+                    - efemeride_id: efe_8a0c2e46-5f39-4d71-b3a5-d7f9b1c3e546
+                      tipo: mes
+                      dia: null
+                      mes: 4
+                      difusion_desde: '2026-04-01'
+                      difusion_hasta: '2026-04-30'
+                      titulo: Abril en la historia de la FIE
+                      texto: En abril de 2016 la FIE y la UTN firmaron un convenio marco de cooperación académica.
+                      piezas_fuente:
+                      - pza_5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                      fragmentos_fuente: []
+                      aprobada_por: mgarcia
+                      aprobada_el: '2026-04-03T15:12:30Z'
+                sinResultados:
+                  summary: Período sin Efemérides Aprobadas
+                  value:
+                    total: 0
+                    efemerides: []
+        '400':
+          description: |
+            Solicitud mal formada: falta `desde` o `hasta`, fecha inválida, `desde` posterior a `hasta`, período de más de
+            92 días o parámetro desconocido. No se reintenta sin corregirla.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Solicitud-Id:
+              $ref: '#/components/headers/XSolicitudId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                sinPeriodo:
+                  summary: Falta `hasta`
+                  value:
+                    codigo: parametros_invalidos
+                    mensaje: La consulta de efemérides requiere los parámetros desde y hasta.
+                    solicitud_id: req_01JA3X2E9FKY
+                periodoLargo:
+                  summary: Período de más de 92 días
+                  value:
+                    codigo: parametros_invalidos
+                    mensaje: El período no puede pasar de 92 días.
+                    solicitud_id: req_01JA3X2E9FKZ
+        '401':
+          $ref: '#/components/responses/V1NoAutenticado'
+        '403':
+          $ref: '#/components/responses/V1NoAutorizado'
+        '404':
+          $ref: '#/components/responses/V1RutaInexistente'
+        '429':
+          $ref: '#/components/responses/V1DemasiadasConsultas'
+        '503':
+          $ref: '#/components/responses/V1NoDisponible'
+  /v1/relatos:
+    get:
+      tags:
+      - Agentes
+      operationId: listarRelatosAgente
+      summary: Propuesta (pendiente de C48). Relatos Aprobados cuya fecha de aprobación cae en un período.
+      description: |
+        Devuelve los Relatos **Aprobados** (DEC-147) cuya fecha de aprobación cae en el período `desde`–`hasta`. Un Relato es un
+        texto de difusión sobre un hito histórico, **no atado a una fecha**, que nació de una respuesta de la Conversación y
+        que una persona de la SEU revisó y firmó. Solo salen Aprobados, sin la marca «fuente retirada» (R-12). La alerta de
+        inyección no sale por `/v1` (C33).
+
+        `desde` y `hasta` son fechas completas y **obligatorios**; `hasta` mayor o igual a `desde` y el rango no puede pasar de
+        **92 días**. Sin Relatos en el período es `200` con `relatos: []`. Los ids llevan prefijo `rel_<uuid>`. No pagina.
+        Alcance requerido: `efemerides:leer` (R-11). Pendiente de C48.
+
+        **Cubre:** DEC-147. Rebanada R0 (mock) y R6 (real, R-43 a).
+      x-alcance: entra
+      x-pendiente: C48
+      security:
+      - token_agente: []
+      parameters:
+      - name: desde
+        in: query
+        required: true
+        description: Inicio del período (fecha completa) sobre la fecha de aprobación.
+        schema:
+          type: string
+          format: date
+        example: '2026-11-01'
+      - name: hasta
+        in: query
+        required: true
+        description: Fin del período (fecha completa). Mayor o igual a `desde`; el rango máximo es de 92 días.
+        schema:
+          type: string
+          format: date
+        example: '2026-11-30'
+      responses:
+        '200':
+          description: Relatos Aprobados del período. Puede venir vacía.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Solicitud-Id:
+              $ref: '#/components/headers/XSolicitudId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RespuestaRelatos'
+              examples:
+                conResultados:
+                  summary: Un Relato Aprobado
+                  value:
+                    total: 1
+                    relatos:
+                    - relato_id: rel_7c2e4a60-1b38-4d95-a0f7-d9e1b3c5f786
+                      titulo: El convenio marco FIE-UTN
+                      texto: En abril de 2016 la FIE y la UTN firmaron un convenio marco de cooperación académica.
+                      piezas_fuente:
+                      - pza_5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                      fragmentos_fuente:
+                      - frg_e41d0c7a-2f95-5b3e-a8c1-96d7f0b3c254
+                      aprobado_por: mgarcia
+                      aprobado_el: '2026-11-12T10:30:00Z'
+                sinResultados:
+                  summary: Período sin Relatos Aprobados
+                  value:
+                    total: 0
+                    relatos: []
+        '400':
+          description: |
+            Solicitud mal formada: falta `desde` o `hasta`, fecha inválida, `desde` posterior a `hasta`, período de más de
+            92 días o parámetro desconocido. No se reintenta sin corregirla.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Solicitud-Id:
+              $ref: '#/components/headers/XSolicitudId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                sinPeriodo:
+                  summary: Falta `hasta`
+                  value:
+                    codigo: parametros_invalidos
+                    mensaje: La consulta de relatos requiere los parámetros desde y hasta.
+                    solicitud_id: req_01JA3X2E9FM1
+                periodoLargo:
+                  summary: Período de más de 92 días
+                  value:
+                    codigo: parametros_invalidos
+                    mensaje: El período no puede pasar de 92 días.
+                    solicitud_id: req_01JA3X2E9FM2
+        '401':
+          $ref: '#/components/responses/V1NoAutenticado'
+        '403':
+          $ref: '#/components/responses/V1NoAutorizado'
+        '404':
+          $ref: '#/components/responses/V1RutaInexistente'
+        '429':
+          $ref: '#/components/responses/V1DemasiadasConsultas'
+        '503':
+          $ref: '#/components/responses/V1NoDisponible'
+  /v1/aportes:
+    post:
+      tags:
+      - Agentes
+      operationId: registrarAporte
+      summary: Registra un aporte de un Agente externo.
+      description: |
+        Registra contenido generado por un Agente externo. El aporte ingresa al Acervo como una Pieza de clase `texto` en
+        estado Pendiente (Ficha v1 con `origen_version = agente_externo`, `creada_por` nulo, original `text/plain;
+        charset=utf-8`) y espera validación humana. No se indexa, no es buscable y no se cita por el solo hecho de haber
+        llegado por la API (ADR-0002). Una vez Validado es una Pieza más y vuelve por `/v1` como cualquiera (DEC-134;
+        pendiente de C48).
+
+        **Rechazo por etiquetas de control (DEC-133; pendiente de C48).** Si el contenido (`titulo` o `cuerpo`) trae
+        etiquetas de control de una lista cerrada (`### Instruction:`, `[SYSTEM]`, `<|im_start|>`, `<|system|>`, `[INST]` y
+        variantes; la lista vive en `chequeo_inyeccion`), el aporte se **rechaza** con `422 aporte_rechazado`: no crea
+        Pieza ni registro de idempotencia. Un documento histórico legítimo que sube una persona se acepta con alerta; el
+        rechazo es solo para esta vía. El 422 se evalúa junto con el 400 (forma y contenido), antes del 404.
+
+        `fecha_publicacion` y `url_publicacion` son opcionales. Cuerpo máximo 256 KiB: uno mayor es `400
+        parametros_invalidos` (en `/v1` el cuerpo grande es 400, no 413). `piezas_fuente` debe ser de Piezas Validadas (un
+        Aporte Validado vale como fuente), si no, `400 fuente_inexistente` (no se distingue el motivo; el `mensaje` lista
+        los ids rechazados). `fragmentos_fuente` solo valida forma, no existencia (DEC-146 punto 19).
+
+        La operación es idempotente por `Idempotency-Key`, sin vencimiento (se propone redactar «al menos 30 días»). Con
+        el interruptor `api_agentes_habilitada = false` no crea Pieza ni registro de idempotencia: `503` con `Retry-After:
+        300`; reintentar con la misma clave.
+
+        **Cubre:** CU-14, RF-25.
+      x-alcance: entra
+      security:
+      - token_agente: []
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        description: |
+          Clave elegida por el cliente que identifica el intento de registro. Historia Viva la recuerda (el contrato
+          1.0.0 dice 30 días; el MVP no la vence: se propone «al menos 30 días»).
+
+          - Clave nueva: se crea la Pieza Pendiente y la respuesta es `201`.
+          - Clave ya vista con el mismo cuerpo: no se crea nada y la respuesta es `200` con el mismo cuerpo que devolvió
+            el `201` original.
+          - Clave ya vista con un cuerpo distinto: `400` con `codigo: idempotency_key_reutilizada`; no se crea nada.
+
+          Se recomienda un UUID v4 por aporte. La clave es propia de cada token: dos Agentes externos distintos no
+          colisionan.
+        schema:
+          type: string
+          minLength: 8
+          maxLength: 128
+          pattern: ^[A-Za-z0-9._:-]+$
+        example: 3f1c9a12-7f0b-4a2e-9a7d-0c5b6e2f1d44
+      requestBody:
+        required: true
+        description: Aporte en JSON, de hasta 256 KiB.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Aporte'
+            examples:
+              borradorSinPublicar:
+                summary: Gacetilla aprobada, todavía sin publicar
+                value:
+                  titulo: La FIE celebra diez años de cooperación con la UTN
+                  cuerpo: La Facultad de Ingeniería del Ejército conmemora una década del convenio marco de cooperación académica
+                    suscripto con la Universidad Tecnológica Nacional en abril de 2016, que articuló carreras de posgrado
+                    en ingeniería de materiales y habilitó prácticas profesionales supervisadas.
+                  tipo_contenido: gacetilla
+                  canal: null
+                  piezas_fuente:
+                  - pza_5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                  - pza_c8e1f402-6a3d-4b95-8f17-2e4a6c8d0b93
+                  fragmentos_fuente:
+                  - frg_e41d0c7a-2f95-5b3e-a8c1-96d7f0b3c254
+                  - frg_a7c93e15-0b6d-4f28-9e41-3d5f7a9c1b86
+              postPublicado:
+                summary: Post ya publicado, con fecha y URL
+                value:
+                  titulo: Diez años del convenio FIE — UTN
+                  cuerpo: En abril de 2016 la FIE firmó con la UTN el convenio que articuló nuestras carreras de posgrado
+                    en ingeniería de materiales. Diez años después, sigue vigente.
+                  tipo_contenido: post
+                  canal: linkedin
+                  piezas_fuente:
+                  - pza_5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+                  fragmentos_fuente:
+                  - frg_e41d0c7a-2f95-5b3e-a8c1-96d7f0b3c254
+                  fecha_publicacion: '2026-04-11'
+                  url_publicacion: https://www.linkedin.com/feed/update/urn:li:activity:7000000000000000000
+      responses:
+        '201':
+          description: Aporte registrado. Se creó una Pieza en estado Pendiente en la cola de validación humana.
+          headers:
+            Location:
+              description: Ruta de la Pieza creada. Devuelve `404 pieza_no_disponible` hasta que una persona la valide; después,
+                la Pieza (DEC-134).
+              schema:
+                type: string
+                format: uri-reference
+              example: /v1/piezas/pza_8d0a6c15-93e2-4b7f-a4d0-5e1f7c2b8a39
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Solicitud-Id:
+              $ref: '#/components/headers/XSolicitudId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AporteCreado'
+              examples:
+                creado:
+                  summary: Aporte nuevo
+                  value:
+                    aporte_id: apt_2c71b9e0-4f3a-4a58-b1d6-e08c5a97f312
+                    pieza_id: pza_8d0a6c15-93e2-4b7f-a4d0-5e1f7c2b8a39
+                    estado: Pendiente
+                    recibido_el: '2026-11-03T14:07:55Z'
+                    idempotency_key: 3f1c9a12-7f0b-4a2e-9a7d-0c5b6e2f1d44
+        '200':
+          description: |
+            La clave de idempotencia ya había sido registrada con el mismo cuerpo. No se creó nada. El cuerpo es idéntico al
+            del `201` original, incluido `recibido_el`.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Solicitud-Id:
+              $ref: '#/components/headers/XSolicitudId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AporteCreado'
+              examples:
+                repetido:
+                  summary: Clave repetida
+                  value:
+                    aporte_id: apt_2c71b9e0-4f3a-4a58-b1d6-e08c5a97f312
+                    pieza_id: pza_8d0a6c15-93e2-4b7f-a4d0-5e1f7c2b8a39
+                    estado: Pendiente
+                    recibido_el: '2026-11-03T14:07:55Z'
+                    idempotency_key: 3f1c9a12-7f0b-4a2e-9a7d-0c5b6e2f1d44
+        '400':
+          description: |
+            Solicitud mal formada o con fuente inexistente: cuerpo que no valida, cuerpo mayor a 256 KiB, `Idempotency-Key`
+            ausente o mal formada, clave reutilizada con un cuerpo distinto, o `piezas_fuente` que no existe o no está
+            Validada. No se reintenta sin corregir la solicitud.
+          headers:
+            RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Solicitud-Id:
+              $ref: '#/components/headers/XSolicitudId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                claveReutilizada:
+                  summary: Clave de idempotencia reutilizada con otro cuerpo
+                  value:
+                    codigo: idempotency_key_reutilizada
+                    mensaje: La clave de idempotencia ya fue usada con un cuerpo distinto. Usá una clave nueva.
+                    solicitud_id: req_01JA3X2E9F8K
+                claveAusente:
+                  summary: Falta la cabecera `Idempotency-Key`
+                  value:
+                    codigo: parametros_invalidos
+                    mensaje: Falta la cabecera Idempotency-Key.
+                    solicitud_id: req_01JA3X2E9F9M
+                cuerpoGrande:
+                  summary: Cuerpo mayor a 256 KiB
+                  value:
+                    codigo: parametros_invalidos
+                    mensaje: El cuerpo supera los 256 KiB admitidos.
+                    solicitud_id: req_01JA3X2E9FAN
+                fuenteInexistente:
+                  summary: Una pieza fuente no existe o no está Validada
+                  value:
+                    codigo: fuente_inexistente
+                    mensaje: 'Fuentes rechazadas: pza_00000000-0000-4000-8000-000000000000.'
+                    solicitud_id: req_01JA3X2E9FBP
+        '401':
+          $ref: '#/components/responses/V1NoAutenticado'
+        '403':
+          $ref: '#/components/responses/V1NoAutorizado'
+        '404':
+          $ref: '#/components/responses/V1RutaInexistente'
+        '422':
+          $ref: '#/components/responses/V1AporteRechazado'
+        '429':
+          $ref: '#/components/responses/V1DemasiadasConsultas'
+        '503':
+          $ref: '#/components/responses/V1NoDisponible'
+components:
+  securitySchemes:
+    token_agente:
+      type: http
+      scheme: bearer
+      bearerFormat: hv_<8 hex>_<43 base64url>
+      description: |
+        `Authorization: Bearer hv_<8 hex>_<43 base64url>`. Un token por Agente externo (N tokens por agente), opaco,
+        revocable de forma independiente y sin permiso alguno sobre la interfaz de las personas. Vence a los 180 días.
+
+        Lo emite el Administrador técnico (`OPERAR_SISTEMA`) y se entrega una sola vez, fuera de banda. Nunca se versiona en un
+        repositorio. Alcances: `fragmentos:leer`, `piezas:leer`, `aportes:escribir` y `efemerides:leer` (Efemérides y
+        Relatos, R-11; pendiente de C48).
+
+        - Token ausente, mal formado, vencido o revocado (o una cookie en lugar de un token): `401 token_invalido`.
+        - Token válido sin el alcance de la operación: `403 operacion_no_permitida`.
+  headers:
+    XSolicitudId:
+      description: Identificador de la solicitud (`req_<ulid>`). El mismo valor va en `solicitud_id` de todo error.
+      schema:
+        type: string
+        pattern: ^req_[0-9A-Za-z]+$
+      example: req_01JA3W8K2M9Q
+    RetryAfter:
+      description: Segundos a esperar antes de reintentar.
+      schema:
+        type: integer
+        minimum: 1
+      example: 30
+    RateLimitLimit:
+      description: |
+        Cupo de la ventana vigente del token (ventana fija de 60 s): 60 consultas por minuto (`GET`), 10 aportes por
+        minuto (`POST`), 2 búsquedas en vuelo. Formato de borradores anteriores del IETF.
+      schema:
+        type: integer
+        minimum: 1
+      example: 60
+    RateLimitRemaining:
+      description: Solicitudes que quedan en la ventana vigente.
+      schema:
+        type: integer
+        minimum: 0
+      example: 57
+    RateLimitReset:
+      description: Segundos que faltan para que la ventana se reinicie.
+      schema:
+        type: integer
+        minimum: 0
+      example: 41
+  schemas:
+    Error:
+      type: object
+      title: Error
+      description: |
+        Forma única de todo error de `/v1`. Excepción deliberada a RFC 9457 (DEC-34, ver `x-excepcion-rfc9457`): el
+        contrato 1.0.0 cerró esta forma y prohíbe propiedades extra.
+      additionalProperties: false
+      required:
+      - codigo
+      - mensaje
+      - solicitud_id
+      properties:
+        codigo:
+          type: string
+          description: |
+            Código estable, legible por máquina. El cliente decide por este campo, no por el texto de `mensaje`.
+          enum:
+          - parametros_invalidos
+          - idempotency_key_reutilizada
+          - fuente_inexistente
+          - token_invalido
+          - operacion_no_permitida
+          - pieza_no_disponible
+          - ruta_inexistente
+          - aporte_rechazado
+          - limite_superado
+          - servicio_no_disponible
+          example: parametros_invalidos
+        mensaje:
+          type: string
+          description: |
+            Explicación en español, para registro y diagnóstico. No revela si una Pieza existe pero no está Validada.
+          example: La consulta requiere al menos uno de los parámetros q, desde o hasta.
+        solicitud_id:
+          type: string
+          description: Identificador de la solicitud en los registros de Historia Viva. Igual a `X-Solicitud-Id`.
+          example: req_01JA3X2E9F5G
+    PrecisionFecha:
+      type: string
+      title: Precisión de la fecha
+      description: |
+        Precisión declarada del rango de fechas de la Pieza. Una fecha exacta es un rango de un solo día con precisión
+        `dia`. `rango` (v1.1, DEC-60) es un intervalo declarado como tal («entre 2015 y 2019»): se redacta «entre X y Y».
+
+        El Agente externo no puede presentar como fecha exacta una Pieza cuya precisión sea `mes`, `anio`, `decada` o
+        `rango`.
+      enum:
+      - dia
+      - mes
+      - anio
+      - decada
+      - rango
+      example: dia
+    IdPiezaV1:
+      type: string
+      pattern: ^pza_[A-Za-z0-9._-]{1,60}$
+      description: 'Identificador estable de una Pieza en `/v1`: prefijo `pza_` y UUID en minúscula. El patrón es el del contrato
+        1.0.0; el UUID se valida dentro del codec (un id con forma inválida es 400 `parametros_invalidos`).'
+      example: pza_5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+    IdFragmentoV1:
+      type: string
+      pattern: ^frg_[A-Za-z0-9._-]{1,60}$
+      description: 'Identificador de un fragmento en `/v1`: prefijo `frg_` y UUID.'
+      example: frg_e41d0c7a-2f95-5b3e-a8c1-96d7f0b3c254
+    IdAporteV1:
+      type: string
+      pattern: ^apt_[A-Za-z0-9._-]{1,60}$
+      description: 'Identificador de un aporte en `/v1`: prefijo `apt_` y UUID.'
+      example: apt_2c71b9e0-4f3a-4a58-b1d6-e08c5a97f312
+    IdLoteV1:
+      type: string
+      pattern: ^lot_[A-Za-z0-9._-]{1,60}$
+      description: 'Identificador de un Lote en `/v1`: prefijo `lot_` y UUID.'
+      example: lot_c3b8e7a4-1d2f-4e6a-b5c9-0a1b2c3d4e5f
+    TipoPieza:
+      type: string
+      title: Tipo de Pieza
+      description: |
+        Tipo de Pieza del Acervo. **Enum abierto** (SUPUESTO, consultas C4, C23 y C24): el cliente no debe tratar esta lista
+        como cerrada; puede aparecer un valor nuevo cuando el Administrador técnico agrega un tipo (sube la versión menor del
+        contrato). Los cinco primeros son los del contrato 1.0.0; `nota`, `plano`, `planilla` y `video` son aditivos.
+      enum:
+      - fotografia
+      - acta
+      - resolucion
+      - convenio
+      - memoria
+      - nota
+      - plano
+      - planilla
+      - video
+      example: convenio
+    TipoContenido:
+      type: string
+      title: Tipo de contenido del aporte
+      description: |
+        Clase de contenido que produjo el Agente externo. **Punto abierto**: valores provisorios, derivados de lo que el
+        Agente 1 genera hoy; el enum definitivo se acuerda y se versiona en este archivo antes de congelar el contrato.
+      enum:
+      - gacetilla
+      - post
+      - comunicado
+      example: gacetilla
+    Canal:
+      type:
+      - string
+      - 'null'
+      title: Canal de difusión
+      description: |
+        Canal al que está destinado el aporte. `null` cuando el contenido no tiene canal propio, como una gacetilla.
+        **Punto abierto**: valores provisorios, a acordar antes de congelar el contrato.
+      enum:
+      - instagram
+      - linkedin
+      - web
+      - null
+      example: linkedin
+    Fragmento:
+      type: object
+      title: Fragmento
+      description: |
+        Un pasaje de una Ficha Validada, con su cita. Es la unidad que Historia Viva entrega. Nunca es prosa redactada por un
+        modelo.
+      additionalProperties: false
+      required:
+      - fragmento_id
+      - pieza_id
+      - texto
+      - fecha_inicio
+      - fecha_fin
+      - precision_fecha
+      - tipo
+      - resumen_pieza
+      - url_original
+      - validada_el
+      - pagina
+      - seccion
+      properties:
+        fragmento_id:
+          allOf:
+          - $ref: '#/components/schemas/IdFragmentoV1'
+          description: |
+            Identificador estable del pasaje dentro de la Pieza. Permite citar el pasaje exacto que fundamenta una
+            afirmación, no solo el documento. Se mantiene estable mientras el cuerpo de la Ficha no cambie; si una persona
+            edita y vuelve a validar la Ficha, los fragmentos se recalculan y pueden cambiar de identificador.
+            `pieza_id` sí es estable siempre.
+        pieza_id:
+          allOf:
+          - $ref: '#/components/schemas/IdPiezaV1'
+          description: Identificador estable de la Pieza a la que pertenece el fragmento.
+        texto:
+          type: string
+          description: |
+            Texto del pasaje, tomado del cuerpo de la Ficha Validada. En un video es lo que escribió una persona.
+          example: En la ciudad de Buenos Aires, a los once días del mes de abril de 2016, se suscribe el convenio marco de
+            cooperación académica entre la Facultad de Ingeniería del Ejército y la Universidad Tecnológica Nacional.
+        fecha_inicio:
+          type: string
+          format: date
+          description: Inicio del rango de fechas de la Pieza.
+          example: '2016-04-11'
+        fecha_fin:
+          type: string
+          format: date
+          description: Fin del rango de fechas de la Pieza. Igual a `fecha_inicio` cuando la fecha es exacta.
+          example: '2016-04-11'
+        precision_fecha:
+          $ref: '#/components/schemas/PrecisionFecha'
+        tipo:
+          $ref: '#/components/schemas/TipoPieza'
+        resumen_pieza:
+          type: string
+          description: Resumen validado de la Pieza. Sirve para decidir si el fragmento es relevante sin pedir la Pieza completa.
+          example: Convenio marco de cooperación académica entre la FIE y la Universidad Tecnológica Nacional, firmado en
+            abril de 2016.
+        url_original:
+          type: string
+          format: uri
+          description: |
+            URL de la Pieza en Historia Viva, armada con `HV_URL_PUBLICA` (`{HV_URL_PUBLICA}/validar.html?pieza=<uuid>`). La
+            abre una persona de la FIE con su sesión; el Agente 1 no puede abrirla (DEC-35). Mientras no haya servidor, el
+            enlace solo abre en la PC del alumno (DEC-119, DEC-146 punto 10). Historia Viva no sirve binarios por esta API.
+          example: http://localhost:8000/validar.html?pieza=5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77
+        validada_el:
+          type: string
+          format: date-time
+          description: Momento en que una persona identificada firmó la Ficha.
+          example: '2026-11-10T15:22:41Z'
+        pagina:
+          type:
+          - integer
+          - 'null'
+          minimum: 1
+          description: |
+            Página del archivo original donde está el pasaje. `null` cuando la Pieza no tiene paginación o la transcripción
+            no la conservó: una fotografía, una planilla o un video nunca la tienen.
+          example: 1
+        seccion:
+          type:
+          - string
+          - 'null'
+          description: |
+            Sección, cláusula o artículo donde está el pasaje. En una planilla es el nombre de la hoja; en un video, la marca
+            `HH:MM:SS` si la hay. `null` cuando la Pieza no tiene una estructura interna nombrada.
+          example: Cláusula primera — Objeto
+    RespuestaFragmentos:
+      type: object
+      title: Respuesta de búsqueda
+      additionalProperties: false
+      required:
+      - total
+      - limite
+      - fragmentos
+      properties:
+        total:
+          type: integer
+          minimum: 0
+          description: |
+            Cantidad de fragmentos devueltos en `fragmentos`. Historia Viva no informa cuántos existirían más allá del
+            límite: no hay paginación en `/v1`.
+          example: 3
+        limite:
+          type: integer
+          minimum: 1
+          maximum: 50
+          description: Límite efectivamente aplicado a la consulta.
+          example: 10
+        fragmentos:
+          type: array
+          description: Fragmentos ordenados por relevancia. Lista vacía si no hubo coincidencias.
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/Fragmento'
+    Pieza:
+      type: object
+      title: Pieza
+      description: |
+        Ficha Validada completa de una Pieza del Acervo. Forma cerrada: no hay campos adicionales. Los campos internos de
+        Historia Viva —marca de chequeo de inyección, estados intermedios— no se exponen.
+      additionalProperties: false
+      required:
+      - pieza_id
+      - tipo
+      - estado
+      - resumen
+      - texto
+      - fecha_inicio
+      - fecha_fin
+      - precision_fecha
+      - origen
+      - lote_id
+      - lote_nombre
+      - url_original
+      - validada_por
+      - validada_el
+      - modo_validacion
+      - fragmentos
+      properties:
+        pieza_id:
+          $ref: '#/components/schemas/IdPiezaV1'
+        tipo:
+          $ref: '#/components/schemas/TipoPieza'
+        estado:
+          type: string
+          description: 'Estado de la Pieza. Siempre `Validada`: esta API no expone material Pendiente ni Incompleto.'
+          enum:
+          - Validada
+          example: Validada
+        resumen:
+          type: string
+          description: Resumen validado de la Pieza.
+        texto:
+          type: string
+          description: |
+            Cuerpo íntegro de la Ficha: la transcripción del documento, o la descripción validada de la imagen más el OCR
+            de su texto visible, más el contexto aportado por personas.
+        fecha_inicio:
+          type: string
+          format: date
+        fecha_fin:
+          type: string
+          format: date
+          description: Fin del rango. Igual a `fecha_inicio` cuando la fecha es exacta.
+        precision_fecha:
+          $ref: '#/components/schemas/PrecisionFecha'
+        origen:
+          type: string
+          description: De dónde proviene la Pieza dentro del Acervo.
+          example: Secretaría de Extensión Universitaria — archivo de convenios
+        lote_id:
+          oneOf:
+          - $ref: '#/components/schemas/IdLoteV1'
+          - type: 'null'
+          description: Lote con el que se cargó la Pieza. `null` si se cargó fuera de un Lote.
+        lote_nombre:
+          type:
+          - string
+          - 'null'
+          description: Nombre del Lote. `null` si no hay Lote.
+        url_original:
+          type: string
+          format: uri
+          description: URL de la Pieza en Historia Viva (ver `Fragmento.url_original`).
+        validada_por:
+          type: string
+          description: Parte local del email institucional de quien firmó la Ficha (SUPUESTO; el contrato decía «handle»).
+          example: mgarcia
+        validada_el:
+          type: string
+          format: date-time
+          description: Momento de la firma.
+        modo_validacion:
+          type: string
+          description: Cómo se validó la Ficha. Una validación en bloque y una individual no merecen la misma confianza.
+          enum:
+          - individual
+          - bloque
+          example: individual
+        fragmentos:
+          type: array
+          description: Todos los fragmentos de esta Pieza, en el orden en que aparecen en el cuerpo de la Ficha.
+          items:
+            $ref: '#/components/schemas/Fragmento'
+    Aporte:
+      type: object
+      title: Aporte
+      description: |
+        Contenido generado por un Agente externo que se registra en el Acervo. Ingresa siempre en estado Pendiente.
+        Máximo 256 KiB en total.
+      additionalProperties: false
+      required:
+      - titulo
+      - cuerpo
+      - tipo_contenido
+      - piezas_fuente
+      properties:
+        titulo:
+          type: string
+          minLength: 1
+          maxLength: 300
+          example: La FIE celebra diez años de cooperación con la UTN
+        cuerpo:
+          type: string
+          minLength: 1
+          maxLength: 20000
+          description: Texto completo del contenido generado.
+        tipo_contenido:
+          $ref: '#/components/schemas/TipoContenido'
+        canal:
+          $ref: '#/components/schemas/Canal'
+        piezas_fuente:
+          type: array
+          description: |
+            Piezas del Acervo que el Agente externo usó como fuente. Puede venir vacía. Una pieza que no existe, no está
+            Validada hace fallar la solicitud con `400 fuente_inexistente`.
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/IdPiezaV1'
+        fragmentos_fuente:
+          type: array
+          description: |
+            Fragmentos concretos que fundamentan el contenido. Opcional. Solo se valida la forma del identificador.
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/IdFragmentoV1'
+        fecha_publicacion:
+          type:
+          - string
+          - 'null'
+          format: date
+          description: Fecha en que el contenido se publicó. Opcional.
+          example: '2026-04-11'
+        url_publicacion:
+          type:
+          - string
+          - 'null'
+          format: uri
+          description: Enlace a la publicación. Opcional.
+          example: https://www.linkedin.com/feed/update/urn:li:activity:7000000000000000000
+    AporteCreado:
+      type: object
+      title: Aporte registrado
+      description: |
+        Acuse del registro. El mismo cuerpo se devuelve con `201` la primera vez y con `200` ante una clave de idempotencia
+        repetida.
+      additionalProperties: false
+      required:
+      - aporte_id
+      - pieza_id
+      - estado
+      - recibido_el
+      - idempotency_key
+      properties:
+        aporte_id:
+          $ref: '#/components/schemas/IdAporteV1'
+        pieza_id:
+          allOf:
+          - $ref: '#/components/schemas/IdPiezaV1'
+          description: |
+            Pieza creada en el Acervo. Consultarla por `GET /v1/piezas/{pieza_id}` devuelve `404 pieza_no_disponible` hasta
+            que una persona la valide; después, la Pieza (DEC-134; pendiente de C48).
+        estado:
+          type: string
+          description: Estado de ingreso. Siempre `Pendiente` (ADR-0002).
+          enum:
+          - Pendiente
+          example: Pendiente
+        recibido_el:
+          type: string
+          format: date-time
+          description: Momento en que Historia Viva recibió el aporte por primera vez. No cambia ante una clave repetida.
+          example: '2026-11-03T14:07:55Z'
+        idempotency_key:
+          type: string
+          description: Clave de idempotencia con la que se registró el aporte.
+          example: 3f1c9a12-7f0b-4a2e-9a7d-0c5b6e2f1d44
+    IdEfemerideV1:
+      type: string
+      pattern: ^efe_[A-Za-z0-9._-]{1,60}$
+      description: 'Identificador de una Efeméride en `/v1`: prefijo `efe_` y UUID (el UUID se valida dentro del codec, como
+        el resto de los ids de `/v1`).'
+      example: efe_4e6a8c02-3d17-4b59-9f81-b3d5f7a9c124
+    EfemerideAgente:
+      type: object
+      title: Efeméride Aprobada
+      description: |
+        Texto breve de difusión que Historia Viva redactó a partir de Fichas Validadas y que una persona de la SEU revisó y
+        firmó. Forma cerrada. No lleva la alerta de inyección (C33).
+      additionalProperties: false
+      required:
+      - efemeride_id
+      - tipo
+      - dia
+      - mes
+      - difusion_desde
+      - difusion_hasta
+      - titulo
+      - texto
+      - piezas_fuente
+      - fragmentos_fuente
+      - aprobada_por
+      - aprobada_el
+      properties:
+        efemeride_id:
+          $ref: '#/components/schemas/IdEfemerideV1'
+        tipo:
+          type: string
+          enum:
+          - dia
+          - mes
+          description: '`dia`: «un día como hoy». `mes`: «en octubre de…».'
+        dia:
+          type:
+          - integer
+          - 'null'
+          minimum: 1
+          maximum: 31
+          description: '`null` en las de mes.'
+        mes:
+          type: integer
+          minimum: 1
+          maximum: 12
+        difusion_desde:
+          type: string
+          format: date
+          description: 'Intervalo de difusión (R-11): en las de día, la misma fecha que `difusion_hasta`; en las de mes, el
+            mes entero.'
+        difusion_hasta:
+          type: string
+          format: date
+        titulo:
+          type: string
+        texto:
+          type: string
+          description: Texto aprobado.
+        piezas_fuente:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdPiezaV1'
+        fragmentos_fuente:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdFragmentoV1'
+        aprobada_por:
+          type: string
+          description: Parte local del email institucional de quien aprobó (SUPUESTO, como `validada_por`).
+        aprobada_el:
+          type: string
+          format: date-time
+    RespuestaEfemerides:
+      type: object
+      additionalProperties: false
+      required:
+      - total
+      - efemerides
+      properties:
+        total:
+          type: integer
+          minimum: 0
+        efemerides:
+          type: array
+          items:
+            $ref: '#/components/schemas/EfemerideAgente'
+    IdRelatoV1:
+      type: string
+      pattern: ^rel_[A-Za-z0-9._-]{1,60}$
+      description: 'Identificador de un Relato en `/v1`: prefijo `rel_` y UUID (el UUID se valida dentro del codec).'
+      example: rel_7c2e4a60-1b38-4d95-a0f7-d9e1b3c5f786
+    RelatoAgente:
+      type: object
+      title: Relato Aprobado
+      description: |
+        Texto de difusión sobre un hito histórico, no atado a una fecha (DEC-147), que nació de una respuesta de la
+        Conversación y que una persona de la SEU revisó y firmó. Forma cerrada. No lleva la alerta de inyección (C33).
+      additionalProperties: false
+      required:
+      - relato_id
+      - titulo
+      - texto
+      - piezas_fuente
+      - fragmentos_fuente
+      - aprobado_por
+      - aprobado_el
+      properties:
+        relato_id:
+          $ref: '#/components/schemas/IdRelatoV1'
+        titulo:
+          type: string
+        texto:
+          type: string
+          description: Texto aprobado.
+        piezas_fuente:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdPiezaV1'
+        fragmentos_fuente:
+          type: array
+          items:
+            $ref: '#/components/schemas/IdFragmentoV1'
+        aprobado_por:
+          type: string
+          description: Parte local del email institucional de quien aprobó (SUPUESTO, como `validada_por`).
+        aprobado_el:
+          type: string
+          format: date-time
+    RespuestaRelatos:
+      type: object
+      additionalProperties: false
+      required:
+      - total
+      - relatos
+      properties:
+        total:
+          type: integer
+          minimum: 0
+        relatos:
+          type: array
+          items:
+            $ref: '#/components/schemas/RelatoAgente'
+  responses:
+    V1NoAutenticado:
+      description: |
+        Falta el token, está mal formado, venció o fue revocado; o se mandó una cookie en lugar de un token. El cliente no
+        reintenta: pide un token nuevo. Es la única respuesta de `/v1` sin `RateLimit-*`: el cupo es por token y acá no
+        hay token válido.
+      headers:
+        X-Solicitud-Id:
+          $ref: '#/components/headers/XSolicitudId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            tokenInvalido:
+              value:
+                codigo: token_invalido
+                mensaje: Token ausente, vencido o revocado.
+                solicitud_id: req_01JA3X2E9FCQ
+    V1NoAutorizado:
+      description: |
+        El token es válido pero no tiene el alcance de esta operación (`fragmentos:leer`, `piezas:leer`,
+        `aportes:escribir` o `efemerides:leer`). El cliente no reintenta: avisa a los responsables.
+      headers:
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitRemaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimitReset'
+        X-Solicitud-Id:
+          $ref: '#/components/headers/XSolicitudId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            sinAlcance:
+              value:
+                codigo: operacion_no_permitida
+                mensaje: El token no tiene permiso para esta operación.
+                solicitud_id: req_01JA3X2E9FDR
+    V1NoEncontrada:
+      description: |
+        La Pieza no existe, no está Validada o está retirada. La respuesta es idéntica en todos los casos: no se revela
+        cuál ocurrió.
+      headers:
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitRemaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimitReset'
+        X-Solicitud-Id:
+          $ref: '#/components/headers/XSolicitudId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            noDisponible:
+              value:
+                codigo: pieza_no_disponible
+                mensaje: No hay una Pieza Validada con ese identificador.
+                solicitud_id: req_01JA3X2E9FES
+    V1RutaInexistente:
+      description: |
+        Ruta o método desconocido bajo `/v1`, con token válido (informativo: un 4xx no se reintenta). Se agrega en v1.1.
+      headers:
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitRemaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimitReset'
+        X-Solicitud-Id:
+          $ref: '#/components/headers/XSolicitudId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            rutaInexistente:
+              value:
+                codigo: ruta_inexistente
+                mensaje: No existe esa ruta en la API de agentes.
+                solicitud_id: req_01JA3X2E9FFT
+    V1DemasiadasConsultas:
+      description: |
+        Se agotó la ventana del token (60 consultas por minuto, 10 aportes por minuto o 2 búsquedas en vuelo). Historia Viva
+        no encola ni reintenta; el cliente espera lo indicado en `Retry-After`.
+      headers:
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitRemaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimitReset'
+        X-Solicitud-Id:
+          $ref: '#/components/headers/XSolicitudId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            limite:
+              value:
+                codigo: limite_superado
+                mensaje: Se superó el límite de consultas para este token.
+                solicitud_id: req_01JA3X2E9FGV
+    V1NoDisponible:
+      description: |
+        Historia Viva no puede atender la solicitud: interruptor `api_agentes_habilitada = false` (`Retry-After: 300`), base
+        o motor de embeddings caídos, búsqueda que tarda más de 12 s, o falla no prevista (`Retry-After: 30`). Nunca se
+        responde un `200` vacío en su lugar. El Agente externo no publica ni atribuye hechos históricos: registra la falla
+        para revisión humana.
+      headers:
+        Retry-After:
+          description: Segundos a esperar antes de reintentar. `300` con el interruptor; `30` con base o motor caídos.
+          schema:
+            type: integer
+            minimum: 1
+          example: 300
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitRemaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimitReset'
+        X-Solicitud-Id:
+          $ref: '#/components/headers/XSolicitudId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            pausado:
+              summary: 'Interruptor activado (`Retry-After: 300`)'
+              value:
+                codigo: servicio_no_disponible
+                mensaje: Historia Viva no está disponible en este momento.
+                solicitud_id: req_01JA3X2E9FHW
+            motorCaido:
+              summary: 'Base o motor de embeddings caídos, o búsqueda sobre 12 s (`Retry-After: 30`)'
+              value:
+                codigo: servicio_no_disponible
+                mensaje: Historia Viva no está disponible en este momento.
+                solicitud_id: req_01JA3X2E9FJX
+    V1AporteRechazado:
+      description: |
+        El contenido del Aporte trae etiquetas de control de una lista cerrada (`### Instruction:`, `[SYSTEM]`,
+        `<|im_start|>`, `<|system|>`, `[INST]` y variantes; la lista vive en `chequeo_inyeccion`). Historia Viva **rechaza**
+        el Aporte: no crea Pieza ni registro de idempotencia (DEC-133). El Agente externo no reintenta sin quitar esas
+        etiquetas. Lo que sube una persona, en cambio, se acepta con alerta.
+      headers:
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitRemaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimitReset'
+        X-Solicitud-Id:
+          $ref: '#/components/headers/XSolicitudId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            aporteRechazado:
+              summary: Propuesta (pendiente de C48). Contenido con etiquetas de control (DEC-133)
+              x-pendiente: C48
+              value:
+                codigo: aporte_rechazado
+                mensaje: El contenido del aporte trae etiquetas de control (### Instruction:) y no se acepta. Quitalas y reenviá.
+                solicitud_id: req_01JA3X2E9FMZ
