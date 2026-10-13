@@ -40,7 +40,7 @@ const APORTE = {
   piezas_fuente: ["pza_5b2e9c40-7a13-4d88-9f06-1c3a8e4d2b77"],
   fragmentos_fuente: ["frg_e41d0c7a-2f95-5b3e-a8c1-96d7f0b3c254"],
 };
-// [ejemplo, status, codigo de error, "C48" si está pendiente de C48]
+// [ejemplo, status, codigo de error, "C48" si viene de C48]
 const RUTAS = [
   {
     ruta: "GET /v1/fragmentos",
@@ -207,7 +207,7 @@ function escribirResultado({ h, modo, resultados, cliente, errorMock }) {
     `| Versión | ${h.version} |`,
     `| Huella | \`${h.sha}\` (${h.coincide ? "coincide con CONGELADO.sha256" : `NO coincide con CONGELADO.sha256: ${h.congelada ?? "sin huella para la versión"}`}) |`,
     `| Mock | Prism ${PRISM} con ${modo} en ${BASE} |`,
-    `| Escenarios | ${ok}/${ESCENARIOS.length} OK (${c48} pendientes de C48) |`,
+    `| Escenarios | ${ok}/${ESCENARIOS.length} OK (${c48} de C48) |`,
     `| Cliente del Agente 1 | ${textoCliente} |`,
     `| Fecha | ${new Date().toISOString()} |`,
     `| Equipo | ${platform()} ${arch()}, Node ${process.version} |`,

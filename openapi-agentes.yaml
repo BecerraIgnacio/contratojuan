@@ -2,8 +2,8 @@
 openapi: 3.1.0
 info:
   title: Historia Viva — API para Agentes externos (/v1)
-  version: 1.1.0-rc1
-  summary: Contrato `/v1` entre Historia Viva y el Agente 1 del Proyecto Centenario. Borrador `contrato-a1/v1.1.0-rc1`.
+  version: 1.1.0-rc2
+  summary: Contrato `/v1` entre Historia Viva y el Agente 1 del Proyecto Centenario. Borrador `contrato-a1/v1.1.0-rc2`.
   description: |
     Historia Viva custodia el Acervo histórico de la Facultad de Ingeniería del Ejército (FIE). Esta API es la que usan
     los Agentes externos (el Agente 1 del Proyecto Centenario) para consultar el Acervo validado y enviar Aportes. Credencial: `Authorization: Bearer hv_<8 hex>_<43 base64url>` (Token de Agente) con su alcance.
@@ -26,14 +26,13 @@ info:
       de la FIE con su sesión. Mientras no haya servidor, el enlace solo abre en la PC del alumno.
     - Nada de `DELETE`. Todo `4xx` es definitivo: no se reintenta sin corregir el pedido.
 
-    **Propuestas del borrador.** Las diferencias con la 1.0.0 están en `x-diferencias-contrato`; las que llevan
-    `propuesta: true` son valores abiertos que proponemos y se acuerdan antes del congelado: `precision_fecha` `rango`,
+    **Acordado con el Agente 1.** Las diferencias con la 1.0.0 están en `x-diferencias-contrato`; las que llevan
+    `acordada` (fecha y dónde) ya las aceptaste por escrito el 13-oct-2026 o las pediste vos: `precision_fecha` `rango`,
     la forma de los ids, los tipos nuevos de `TipoPieza`, los códigos de error nuevos, el 400 por parámetros
-    desconocidos, la idempotencia sin vencimiento, `url_original`, los límites de consultas y la rotación de token.
-
-    **Pendiente de C48 (propuesta).** `GET /v1/efemerides`, `GET /v1/relatos` (alcance `efemerides:leer`), el Aporte
-    Validado que vuelve por `/v1` y el `422 aporte_rechazado` son una propuesta que todavía no aceptaste: las operaciones
-    y los ejemplos llevan `x-pendiente: C48`.
+    desconocidos, la idempotencia sin vencimiento, `url_original`, los límites de consultas, la rotación de token,
+    `GET /v1/efemerides`, `GET /v1/relatos` (alcance `efemerides:leer`), el Aporte Validado que vuelve por `/v1`, el
+    `422 aporte_rechazado` y los valores `newsletter` (`TipoContenido`) y `correo` (`Canal`). No queda ninguna
+    propuesta abierta.
 
     **Mock.** Junto con este archivo va `compose.yaml`: `docker compose up` levanta Prism 5.16.0 en
     `http://localhost:4010` (sin Docker: `npx @stoplight/prism-cli@5.16.0 mock openapi-agentes.yaml`). Cada escenario
@@ -83,8 +82,8 @@ x-excepcion-rfc9457:
     acordado. Resultado: un catálogo interno de errores y dos serializadores. Los `codigo` de `/v1` son los del
     `openapi.yaml` 1.0.0 (`parametros_invalidos`, `idempotency_key_reutilizada`, `token_invalido`,
     `operacion_no_permitida`, `pieza_no_disponible`, `limite_superado`, `servicio_no_disponible`) más
-    `fuente_inexistente` y `ruta_inexistente` (DEC-67) y, desde el 10-oct, `aporte_rechazado` (422, DEC-133, R-29; pendiente de
-    C48). En `/v1` el cuerpo grande y la cabecera ausente son 400 `parametros_invalidos` (no 413) y una falla no prevista
+    `fuente_inexistente` y `ruta_inexistente` (DEC-67) y, desde el 10-oct, `aporte_rechazado` (422, DEC-133, R-29; acordado con
+    el Agente 1 el 13-oct-2026). En `/v1` el cuerpo grande y la cabecera ausente son 400 `parametros_invalidos` (no 413) y una falla no prevista
     es 503 (no 500).
 x-diferencias-contrato:
 - tema: Formato de error (excepción RFC 9457)
@@ -94,13 +93,13 @@ x-diferencias-contrato:
   cual_manda: Contrato en `/v1`; RFC 9457 en `/api` y `/auth`.
   avisar_a_juan: No (no cambia nada para él).
 - tema: precision_fecha
-  propuesta: true
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md P-02: ACEPTAR)'
   contrato: 4 valores (`dia`, `mes`, `anio`, `decada`).
   mvp: '5 valores: suma `rango` («entre 2015 y 2019»). Regla de redacción: «entre X y Y» (DEC-60).'
   cual_manda: MVP (aditivo; rompe clientes estrictos con enum cerrado).
   avisar_a_juan: Sí.
 - tema: Forma de los ids
-  propuesta: true
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md P-03: ACEPTAR)'
   contrato: Strings con patrón `^pza_[A-Za-z0-9._-]{1,60}$` para la Pieza; los ejemplos usan `pza_2016-0412`, `frg_01H9…-0003`,
     `apt_2026-0475`.
   mvp: '`pza_<uuid>`, `frg_<uuid>`, `apt_<uuid>`, `lot_<uuid>` (DEC-62). Este YAML conserva el patrón del contrato 1.0.0 (`^pza_[A-Za-z0-9._-]{1,60}$`;
@@ -110,14 +109,14 @@ x-diferencias-contrato:
   cual_manda: Patrón del contrato 1.0.0; el UUID lo valida el codec.
   avisar_a_juan: Sí (solo que los ejemplos cambian).
 - tema: TipoPieza
-  propuesta: true
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md P-04: ACEPTAR)'
   contrato: 'Enum abierto de 5: `fotografia`, `acta`, `resolucion`, `convenio`, `memoria`.'
   mvp: '9 valores: suma `nota`, `plano`, `planilla`, `video` (SUPUESTO; consultas C4, C23, C24). Los tipos los siembra la
     migración (DEC-105); `POST /api/admin/tipos` queda fuera del MVP y, si se agregara, sube la versión menor del contrato.'
   cual_manda: MVP (enum abierto, se versiona).
   avisar_a_juan: Sí.
 - tema: Códigos de error de /v1
-  propuesta: true
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md P-05: ACEPTAR)'
   contrato: '`parametros_invalidos`, `idempotency_key_reutilizada`, `token_invalido`, `operacion_no_permitida`, `pieza_no_disponible`,
     `limite_superado`, `servicio_no_disponible`.'
   mvp: 'Suma `fuente_inexistente` (400) y `ruta_inexistente` (404). Sin 413 ni 500: el cuerpo grande y la cabecera ausente
@@ -125,25 +124,26 @@ x-diferencias-contrato:
   cual_manda: MVP (aditivo).
   avisar_a_juan: 'Sí (informativo: todo 4xx no se reintenta).'
 - tema: Parámetros desconocidos
-  propuesta: true
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md P-06: ACEPTAR)'
   contrato: No lo dice.
   mvp: 400 `parametros_invalidos` (un `limit` mal escrito no se ignora).
   cual_manda: MVP.
   avisar_a_juan: Sí.
 - tema: Idempotencia
-  propuesta: true
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md P-07: ACEPTAR)'
   contrato: «Recuerda 30 días»; un reintento posterior crea un aporte nuevo.
-  mvp: Se recuerda sin vencimiento (`hv_app` no tiene `DELETE`). Se propone redactar «al menos 30 días».
+  mvp: Se recuerda sin vencimiento (`hv_app` no tiene `DELETE`). El contrato dice «al menos 30 días».
   cual_manda: MVP (cumple más).
   avisar_a_juan: Sí.
-- tema: Aportes Validados en /v1 (DEC-134; pendiente de C48)
+- tema: Aportes Validados en /v1 (DEC-134)
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md C48-2: ACEPTAR)'
   contrato: '`GET /v1/piezas/{id}` devuelve 404 «hasta que una persona la valide»; después sí.'
   mvp: El Aporte Validado vuelve por `/v1/piezas/{id}` y `/v1/fragmentos` como cualquier Pieza. Queda sin efecto la exclusión
     de DEC-17 y su 404 permanente. Coincide con el contrato 1.0.0.
-  cual_manda: Contrato 1.0.0 (el MVP deja de apartarse). Pendiente de C48.
+  cual_manda: Contrato 1.0.0 (el MVP deja de apartarse). Acordado (C48).
   avisar_a_juan: Sí (C48; retira el aviso de C33 sobre el 404 permanente).
 - tema: url_original
-  propuesta: true
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md P-09: ACEPTAR)'
   contrato: Enlace a Drive; el Agente 1 hoy no puede abrirlo.
   mvp: URL de la Pieza en Historia Viva, armada con `HV_URL_PUBLICA` (`{HV_URL_PUBLICA}/validar.html?pieza=<uuid>`), que abre
     una persona de la FIE con su sesión; el Agente 1 no puede abrirla (DEC-35). Mientras no haya servidor, el enlace solo
@@ -152,11 +152,11 @@ x-diferencias-contrato:
   cual_manda: MVP (campo requerido, `uri`).
   avisar_a_juan: Sí.
 - tema: Límite de consultas
-  propuesta: true
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md P-10: ACEPTAR)'
   contrato: Número sin acordar; a proponer.
   mvp: 60 consultas/min, 10 aportes/min y 2 búsquedas en vuelo por token (ventana fija de 60 s en memoria); `RateLimit-Limit`,
     `RateLimit-Remaining`, `RateLimit-Reset` y `Retry-After`.
-  cual_manda: MVP (propuesta; se ajusta con la medición).
+  cual_manda: MVP (se ajusta con la medición).
   avisar_a_juan: Sí.
 - tema: Orden de chequeos
   contrato: No lo fija.
@@ -169,10 +169,9 @@ x-diferencias-contrato:
   cual_manda: MVP.
   avisar_a_juan: 'Sí (informativo: reintentar con la misma `Idempotency-Key`).'
 - tema: Rotación de token
-  propuesta: true
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md P-13: ACEPTAR)'
   contrato: «Ventana de solapamiento acordada por las partes».
-  mvp: N tokens por agente, formato `hv_<8 hex>_<43 base64url>`, vencen a los 180 días; ventana de solape propuesta de 7 días
-    (SUPUESTO).
+  mvp: N tokens por agente, formato `hv_<8 hex>_<43 base64url>`, vencen a los 180 días; ventana de solape de 7 días.
   cual_manda: MVP.
   avisar_a_juan: Sí.
 - tema: Mock
@@ -235,8 +234,8 @@ x-diferencias-contrato:
 - tema: Versión del YAML
   contrato: 1.0.0.
   mvp: 1.1.0 (tag `contrato-a1/v1.1.0`); `GET /v1/salud` de los informes no se agrega. La fuente `.scratch/mvp/openapi.yaml`
-    lleva `1.1.0-mvp` porque además describe la parte web; el derivado para Juan, `1.1.0-rc1` hasta el congelado. Lo del 10-oct
-    es aditivo (un endpoint y un código nuevos) y entra en la misma 1.1.0 si C48 se cierra antes del congelado del 30-oct.
+    lleva `1.1.0-mvp` porque además describe la parte web; el derivado para Juan, `1.1.0-rcN` hasta el congelado. C48 se cerró
+    el 13-oct-2026 y lo del 10-oct (efemérides, Relatos, Aportes Validados y `422 aporte_rechazado`) entra en la 1.1.0.
   cual_manda: MVP.
   avisar_a_juan: Sí (C27, C48).
 - tema: Dos OpenAPI (agregada por esta redacción)
@@ -258,38 +257,46 @@ x-diferencias-contrato:
     contrato más `efemerides`). Las pruebas reales se hacen en una sesión presencial (DEC-119).
   cual_manda: MVP.
   avisar_a_juan: Sí (C37, C48).
-- tema: Efemérides por /v1 (DEC-130; pendiente de C48)
-  propuesta: true
+- tema: Efemérides por /v1 (DEC-130)
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md C48-1 y C48-6: ACEPTAR)'
   contrato: 'Punto 7 y §11: «la efeméride deja de ser un producto de Historia Viva»; el Agente 1 consulta por período y redacta
     la suya. Sin endpoint de efemérides.'
   mvp: '`GET /v1/efemerides?desde&hasta` devuelve solo las Efemérides **Aprobadas** (redactadas por un modelo de Historia
     Viva y firmadas por una persona de la SEU). Reabre C12. `desde` y `hasta` obligatorios, rango máximo de 92 días, solapamiento
     con el intervalo de difusión de cada efeméride (día: la misma fecha; mes: el mes entero), ids `efe_<uuid>` y alcance de
-    token propio `efemerides:leer` (R-11). Falta que Juan lo acepte (C48).'
-  cual_manda: MVP (anteproyecto págs. 7, 8, 22, 25). Pendiente de C48.
+    token propio `efemerides:leer` (R-11).'
+  cual_manda: MVP (anteproyecto págs. 7, 8, 22, 25). Acordado (C48).
   avisar_a_juan: 'Sí (C48: renegociar §1 punto 7 y §11).'
-- tema: Rechazo de Aportes con etiquetas de control (DEC-133; pendiente de C48)
-  propuesta: true
+- tema: Rechazo de Aportes con etiquetas de control (DEC-133)
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md C48-3: ACEPTAR)'
   contrato: '`POST /v1/aportes` no define ningún rechazo por contenido; solo 400, 401, 403, 429 y 503 (DEC-34).'
   mvp: 'Un Aporte cuyo contenido trae etiquetas de control de una lista cerrada (`### Instruction:`, `[SYSTEM]`, `<|im_start|>`,
     `<|system|>`, `[INST]` y variantes) se rechaza con `422 aporte_rechazado`: no crea Pieza ni registro de idempotencia.
     El 422 se evalúa junto con el 400 (forma y contenido), antes del 404. El código va en snake_case como el resto de `/v1`
     (R-29).'
-  cual_manda: 'MVP (aditivo: un código y un status nuevos). Pendiente de C48.'
+  cual_manda: 'MVP (aditivo: un código y un status nuevos). Acordado (C48).'
   avisar_a_juan: Sí (C48; amplía C27 y C33).
+- tema: TipoContenido y Canal del Aporte
+  contrato: '`TipoContenido`: `gacetilla`, `post`, `comunicado`. `Canal`: `instagram`, `linkedin`, `web`, `null`. Ambos marcados
+    «punto abierto».'
+  mvp: '`TipoContenido` suma `newsletter` y `Canal` suma `correo` (canal de la newsletter). Las confirmaciones y los certificados
+    no se aportan porque llevan datos personales.'
+  cual_manda: MVP (aditivo; cierra el punto abierto, C16).
+  avisar_a_juan: Sí (lo pidió él).
+  acordada: 13-oct-2026 (Juan, PEDIDOS-AGENTE1.md pedido 6)
 - tema: Alcance del token para Efemérides y Relatos (R-11)
-  propuesta: true
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md C48-5: ACEPTAR)'
   contrato: 'Alcances: `fragmentos:leer`, `piezas:leer`, `aportes:escribir`.'
   mvp: Alcance nuevo `efemerides:leer`, que cubre `GET /v1/efemerides` y `GET /v1/relatos`. Los tokens existentes no lo tienen.
-  cual_manda: MVP (aditivo). Pendiente de C48.
+  cual_manda: MVP (aditivo). Acordado (C48).
   avisar_a_juan: Sí (C48).
-- tema: Relatos por /v1 (DEC-147; pendiente de C48)
-  propuesta: true
+- tema: Relatos por /v1 (DEC-147)
+  acordada: '13-oct-2026 (Juan, PREGUNTAS.md C48-4: ACEPTAR)'
   contrato: Sin endpoint de relatos.
   mvp: '`GET /v1/relatos?desde&hasta` devuelve solo los Relatos **Aprobados** (texto de difusión sobre un hito, no atado a
     una fecha), por fecha de aprobación, con `desde`/`hasta` obligatorios, rango máximo de 92 días, ids `rel_<uuid>` y alcance
     `efemerides:leer`.'
-  cual_manda: MVP (aditivo). Pendiente de C48.
+  cual_manda: MVP (aditivo). Acordado (C48).
   avisar_a_juan: Sí (C48).
 paths:
   /v1/fragmentos:
@@ -307,10 +314,10 @@ paths:
         responder (embedding caído o más de 12 s) es `503`, **nunca** un `200` vacío.
 
         Solo salen Piezas Validadas y no retiradas, de cualquier vía de ingreso: un Aporte Validado es una Pieza más y
-        vuelve por acá como cualquiera (DEC-134; pendiente de C48). La alerta de inyección no sale (C33). Un parámetro
+        vuelve por acá como cualquiera (DEC-134). La alerta de inyección no sale (C33). Un parámetro
         desconocido es `400 parametros_invalidos`.
 
-        Las Efemérides Aprobadas se piden por `GET /v1/efemerides` (DEC-130; pendiente de C48). Esta búsqueda sigue siendo la
+        Las Efemérides Aprobadas se piden por `GET /v1/efemerides` (DEC-130). Esta búsqueda sigue siendo la
         vía para armar una pieza temática o una efeméride propia con `precision_fecha`.
 
         Planillas: `seccion` es el nombre de la hoja y `pagina` es `null`. Video: `pagina` es `null`, `seccion` es la marca
@@ -558,7 +565,7 @@ paths:
         Amplía una recuperación insuficiente. Devuelve la Ficha Validada completa de la Pieza: sus campos duros, el cuerpo
         íntegro y todos sus fragmentos. Forma cerrada (`additionalProperties: false`).
 
-        Un Aporte Validado se devuelve como cualquier Pieza (DEC-134; pendiente de C48). Si la Pieza no existe, no está
+        Un Aporte Validado se devuelve como cualquier Pieza (DEC-134). Si la Pieza no existe, no está
         Validada o está retirada, la respuesta es `404 pieza_no_disponible` con el mismo cuerpo en todos los casos. Un `404`
         posterior a un `200` es válido: una Ficha reabierta o retirada deja de ser pública.
 
@@ -657,8 +664,7 @@ paths:
                       pagina: 2
                       seccion: Firmas
                 aporteValidado:
-                  summary: Propuesta (pendiente de C48). Aporte de un Agente externo, ya Validado por una persona (DEC-134)
-                  x-pendiente: C48
+                  summary: Aporte de un Agente externo, ya Validado por una persona (DEC-134)
                   value:
                     pieza_id: pza_8d0a6c15-93e2-4b7f-a4d0-5e1f7c2b8a39
                     tipo: nota
@@ -757,7 +763,7 @@ paths:
       tags:
       - Agentes
       operationId: listarEfemeridesAgente
-      summary: Propuesta (pendiente de C48). Efemérides Aprobadas cuya difusión cae en un período.
+      summary: Efemérides Aprobadas cuya difusión cae en un período.
       description: |
         Devuelve las Efemérides **Aprobadas** cuyo intervalo de difusión (`difusion_desde`–`difusion_hasta`) se **solapa** con
         el período `desde`–`hasta` (R-11). En las de día, el intervalo es esa misma fecha; en las de mes, el mes entero. Solo
@@ -771,12 +777,11 @@ paths:
         prefijo `efe_<uuid>`. No pagina.
 
         Este endpoint **reabre** el punto 7 del contrato 1.0.0 («la efeméride deja de ser un producto de Historia Viva»):
-        diferencia pendiente de C48 (ver `x-diferencias-contrato`). Alcance requerido: `efemerides:leer` (R-11), que cubre
+        diferencia acordada con el Agente 1 el 13-oct-2026 (ver `x-diferencias-contrato`). Alcance requerido: `efemerides:leer` (R-11), que cubre
         también `GET /v1/relatos`.
 
         **Cubre:** DIR-45, DEC-130. Rebanada R0 (mock) y R6 (real, R-43 a).
       x-alcance: entra
-      x-pendiente: C48
       security:
       - token_agente: []
       parameters:
@@ -895,7 +900,7 @@ paths:
       tags:
       - Agentes
       operationId: listarRelatosAgente
-      summary: Propuesta (pendiente de C48). Relatos Aprobados cuya fecha de aprobación cae en un período.
+      summary: Relatos Aprobados cuya fecha de aprobación cae en un período.
       description: |
         Devuelve los Relatos **Aprobados** (DEC-147) cuya fecha de aprobación cae en el período `desde`–`hasta`. Un Relato es un
         texto de difusión sobre un hito histórico, **no atado a una fecha**, que nació de una respuesta de la Conversación y
@@ -904,11 +909,10 @@ paths:
 
         `desde` y `hasta` son fechas completas y **obligatorios**; `hasta` mayor o igual a `desde` y el rango no puede pasar de
         **92 días**. Sin Relatos en el período es `200` con `relatos: []`. Los ids llevan prefijo `rel_<uuid>`. No pagina.
-        Alcance requerido: `efemerides:leer` (R-11). Pendiente de C48.
+        Alcance requerido: `efemerides:leer` (R-11).
 
         **Cubre:** DEC-147. Rebanada R0 (mock) y R6 (real, R-43 a).
       x-alcance: entra
-      x-pendiente: C48
       security:
       - token_agente: []
       parameters:
@@ -1014,10 +1018,9 @@ paths:
         Registra contenido generado por un Agente externo. El aporte ingresa al Acervo como una Pieza de clase `texto` en
         estado Pendiente (Ficha v1 con `origen_version = agente_externo`, `creada_por` nulo, original `text/plain;
         charset=utf-8`) y espera validación humana. No se indexa, no es buscable y no se cita por el solo hecho de haber
-        llegado por la API (ADR-0002). Una vez Validado es una Pieza más y vuelve por `/v1` como cualquiera (DEC-134;
-        pendiente de C48).
+        llegado por la API (ADR-0002). Una vez Validado es una Pieza más y vuelve por `/v1` como cualquiera (DEC-134).
 
-        **Rechazo por etiquetas de control (DEC-133; pendiente de C48).** Si el contenido (`titulo` o `cuerpo`) trae
+        **Rechazo por etiquetas de control (DEC-133).** Si el contenido (`titulo` o `cuerpo`) trae
         etiquetas de control de una lista cerrada (`### Instruction:`, `[SYSTEM]`, `<|im_start|>`, `<|system|>`, `[INST]` y
         variantes; la lista vive en `chequeo_inyeccion`), el aporte se **rechaza** con `422 aporte_rechazado`: no crea
         Pieza ni registro de idempotencia. Un documento histórico legítimo que sube una persona se acepta con alerta; el
@@ -1028,7 +1031,7 @@ paths:
         Aporte Validado vale como fuente), si no, `400 fuente_inexistente` (no se distingue el motivo; el `mensaje` lista
         los ids rechazados). `fragmentos_fuente` solo valida forma, no existencia (DEC-146 punto 19).
 
-        La operación es idempotente por `Idempotency-Key`, sin vencimiento (se propone redactar «al menos 30 días»). Con
+        La operación es idempotente por `Idempotency-Key`, sin vencimiento (el contrato dice «al menos 30 días»). Con
         el interruptor `api_agentes_habilitada = false` no crea Pieza ni registro de idempotencia: `503` con `Retry-After:
         300`; reintentar con la misma clave.
 
@@ -1219,7 +1222,7 @@ components:
 
         Lo emite el Administrador técnico (`OPERAR_SISTEMA`) y se entrega una sola vez, fuera de banda. Nunca se versiona en un
         repositorio. Alcances: `fragmentos:leer`, `piezas:leer`, `aportes:escribir` y `efemerides:leer` (Efemérides y
-        Relatos, R-11; pendiente de C48).
+        Relatos, R-11).
 
         - Token ausente, mal formado, vencido o revocado (o una cookie en lugar de un token): `401 token_invalido`.
         - Token válido sin el alcance de la operación: `403 operacion_no_permitida`.
@@ -1353,12 +1356,13 @@ components:
       type: string
       title: Tipo de contenido del aporte
       description: |
-        Clase de contenido que produjo el Agente externo. **Punto abierto**: valores provisorios, derivados de lo que el
-        Agente 1 genera hoy; el enum definitivo se acuerda y se versiona en este archivo antes de congelar el contrato.
+        Clase de contenido que produjo el Agente externo. El enum se acordó con el Agente 1 el 13-oct-2026 (C16):
+        `newsletter` suma a los tres valores provisorios del contrato 1.0.0.
       enum:
       - gacetilla
       - post
       - comunicado
+      - newsletter
       example: gacetilla
     Canal:
       type:
@@ -1367,11 +1371,13 @@ components:
       title: Canal de difusión
       description: |
         Canal al que está destinado el aporte. `null` cuando el contenido no tiene canal propio, como una gacetilla.
-        **Punto abierto**: valores provisorios, a acordar antes de congelar el contrato.
+        El enum se acordó con el Agente 1 el 13-oct-2026 (C16): `correo` suma a los valores provisorios del contrato 1.0.0
+        y es el canal de la newsletter.
       enum:
       - instagram
       - linkedin
       - web
+      - correo
       - null
       example: linkedin
     Fragmento:
@@ -1657,7 +1663,7 @@ components:
           - $ref: '#/components/schemas/IdPiezaV1'
           description: |
             Pieza creada en el Acervo. Consultarla por `GET /v1/piezas/{pieza_id}` devuelve `404 pieza_no_disponible` hasta
-            que una persona la valide; después, la Pieza (DEC-134; pendiente de C48).
+            que una persona la valide; después, la Pieza (DEC-134).
         estado:
           type: string
           description: Estado de ingreso. Siempre `Pendiente` (ADR-0002).
@@ -1987,8 +1993,7 @@ components:
             $ref: '#/components/schemas/Error'
           examples:
             aporteRechazado:
-              summary: Propuesta (pendiente de C48). Contenido con etiquetas de control (DEC-133)
-              x-pendiente: C48
+              summary: Contenido con etiquetas de control (DEC-133)
               value:
                 codigo: aporte_rechazado
                 mensaje: El contenido del aporte trae etiquetas de control (### Instruction:) y no se acepta. Quitalas y reenviá.
